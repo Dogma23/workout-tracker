@@ -5,12 +5,15 @@ weight you use, run a rest timer between sets with an interval you choose, and s
 a dashboard of your progress. Works offline and installs to your phone's home
 screen (it's a PWA). No accounts, no server — your data lives on your device.
 
-## Features (v1)
+## Features
 
 - **Four workout days built in** — Push, Pull, Full Body + Core, Core + Conditioning — with your exact exercises, sets, reps and injury notes.
 - **Weight + reps logging** per set, with your last-used weight pre-filled next time.
-- **Rest timer** that auto-starts when you tick a set complete. Pick the interval (30 / 45 / 60 / 90 / 120 / 180s or a custom value), ±15s on the fly, beep + vibrate when it ends, and the screen stays awake during rest.
-- **Dashboard** — total workouts, this-week count, day streak, total volume lifted, recent sessions, and personal bests per exercise.
+- **Rest timer** that auto-starts when you tick a set complete. Pick the interval (30 / 45 / 60 / 90 / 120 / 180s or a custom value), ±15s on the fly, and the screen stays awake during rest.
+- **Timer sounds** — a soft start cue, a 3·2·1 countdown blip, and an ascending finish chime (plus vibrate). All generated in-app with the Web Audio API, so nothing to download and it works offline. Toggle in Settings.
+- **Progression prompts** — follows the plan's "every ~2 weeks, if it's easy, nudge it up" rule. When you've held a weight for 2+ sessions while hitting the top of the rep range, the dashboard flags the lift as *Ready to progress* and the workout screen shows a one-tap button to load the suggested next weight (+2.5 kg / +5 lb, or +1 rep / +5s for bodyweight moves and holds).
+- **Dashboard graphs** — a workout-volume bar chart over your recent sessions, and a per-exercise weight-progress line chart with an exercise picker. Drawn as inline SVG (no chart libraries), so they work offline too.
+- **Dashboard stats** — total workouts, this-week count, day streak, total volume lifted, recent sessions, and personal bests per exercise.
 - **Offline-first PWA** — add to home screen; it runs with no signal in the gym.
 - **Your data, exportable** — everything is stored locally; export to JSON from Settings.
 
@@ -48,9 +51,9 @@ change so the offline copy refreshes.
 
 ## Roadmap ideas
 
-- Progress charts per exercise (weight over time)
-- Progression prompts from your "+1 rep / +2.5% every 2 weeks" rule
+- Per-set RPE / "felt easy?" tagging to sharpen the progression suggestions
 - Custom exercises and reordering
+- Editing or deleting a past session
 - Cloud sync / backup
 
 ---

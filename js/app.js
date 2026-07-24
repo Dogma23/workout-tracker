@@ -32,6 +32,7 @@ let settings = Object.assign({}, DEFAULT_SETTINGS, load(KEY.settings, {}));
 let history = load(KEY.history, []);
 let last = load(KEY.last, {});
 let active = load(KEY.active, null);   // in-progress session or null
+let chartEx = null;                    // exercise selected in the progress line chart
 
 const REST_PRESETS = [30, 45, 60, 90, 120, 180];
 
@@ -127,6 +128,173 @@ function personalBests() {
   return best;
 }
 
+/* ------------------------------------------------------------------ *
+ * Progression — the plan's rule: every ~2 weeks, if a movement is
+ * pain-free and you're hitting the top of the rep range, nudge it up
+ * (a small weight bump, or +1 rep / +5s for bodyweight moves & holds).
+ * ------------------------------------------------------------------ */
+
+// First plan definition of each exercise, looked up by name.
+const PLAN_EX_BY_NAME = {};
+PLAN_ORDER.forEach((id) => PLAN[id].exercises.forEach((ex) => {
+  if (!PLAN_EX_BY_NAME[ex.name]) PLAN_EX_BY_NAME[ex.name] = ex;
+}));
+
+// Top of a target range, e.g. "10–12" -> 12, "20 sec each side" -> 20.
+function targetTop(repsStr) {
+  const nums = String(repsStr).match(/\d+/g);
+  return nums ? Math.max(...nums.map(Number)) : 0;
+}
+
+// Progression metric for one session's exercise entry:
+//  weight-tracked  -> heaviest completed set's weight
+//  bodyweight/time -> best completed reps / seconds
+function exLoad(exEntry, track) {
+  const vals = exEntry.sets.filter((s) => s.done)
+    .map((s) => (track === 'weight' ? num(s.weight) : num(s.reps)));
+  return vals.length ? Math.max(...vals) : 0;
+}
+function exBestReps(exEntry) {
+  const vals = exEntry.sets.filter((s) => s.done).map((s) => num(s.reps));
+  return vals.length ? Math.max(...vals) : 0;
+}
+
+// Smallest sensible jump for the current unit.
+const weightStep = () => (settings.unit === 'kg' ? 2.5 : 5);
+
+// Is this exercise ready to progress? Returns a suggestion object, or null.
+function progressionFor(name) {
+  const plan = PLAN_EX_BY_NAME[name];
+  if (!plan) return null;
+  const track = plan.tracks;
+  if (/min/i.test(plan.reps)) return null;   // skip steady cardio (e.g. "10 min")
+
+  // Sessions containing this exercise, newest first.
+  const sessions = history
+    .map((h) => ({ date: h.date, ex: h.exercises.find((e) => e.name === name) }))
+    .filter((r) => r.ex);
+  if (sessions.length < 2) return null;
+
+  const top = targetTop(plan.reps);
+  const metTarget = (r) => (track === 'weight'
+    ? exBestReps(r.ex) >= top && exLoad(r.ex, 'weight') > 0
+    : exLoad(r.ex, track) >= top);
+
+  const newest = sessions[0];
+  if (!metTarget(newest)) return null;
+  const current = exLoad(newest.ex, track);
+  if (current <= 0) return null;
+
+  // Count consecutive recent sessions at >= current load that hit target.
+  let streak = 0, oldestDate = newest.date;
+  for (const r of sessions) {
+    if (exLoad(r.ex, track) >= current - 1e-9 && metTarget(r)) { streak++; oldestDate = r.date; }
+    else break;
+  }
+  const daysHeld = Math.round((Date.now() - oldestDate) / 864e5);
+
+  // Ready when it's been ~2 weeks, or 2+ solid sessions at this load.
+  if (!(streak >= 2 || daysHeld >= 14)) return null;
+
+  if (track === 'weight') {
+    const next = +(current + weightStep()).toFixed(2);
+    return { name, track, current, next,
+      label: `Try ${next} ${settings.unit}`,
+      detail: `Held ${current} ${settings.unit} for ${streak} session${streak > 1 ? 's' : ''} — add ${weightStep()} ${settings.unit} or a rep.` };
+  }
+  const isTime = track === 'time';
+  const next = current + (isTime ? 5 : 1);
+  return { name, track, current, next,
+    label: `Try ${next}${isTime ? 's' : ' reps'}`,
+    detail: `Hit ${current}${isTime ? 's' : ' reps'} for ${streak} session${streak > 1 ? 's' : ''} — add ${isTime ? '5 seconds' : 'a rep'}.` };
+}
+
+function allProgressions() {
+  return Object.keys(PLAN_EX_BY_NAME).map(progressionFor).filter(Boolean);
+}
+
+/* ------------------------------------------------------------------ *
+ * Tiny inline-SVG charts (no libraries — keeps the app offline).
+ * ------------------------------------------------------------------ */
+const shortDate = (ts) => new Date(ts).toLocaleDateString([], { day: 'numeric', month: 'numeric' });
+
+function volumeSeries(limit = 10) {
+  return history.slice(0, limit).reverse().map((h) => ({
+    label: shortDate(h.date),
+    value: h.volume != null ? h.volume : sessionVolume(h),
+  }));
+}
+
+function exerciseSeries(name) {
+  const plan = PLAN_EX_BY_NAME[name];
+  const track = plan ? plan.tracks : 'weight';
+  return history.slice().reverse()
+    .map((h) => ({ date: h.date, ex: h.exercises.find((e) => e.name === name) }))
+    .filter((r) => r.ex)
+    .map((r) => ({ label: shortDate(r.date), value: exLoad(r.ex, track) }))
+    .filter((p) => p.value > 0);
+}
+
+function chartableExercises() {
+  return Object.keys(PLAN_EX_BY_NAME).filter((n) => exerciseSeries(n).length >= 2);
+}
+
+function metricLabel(name) {
+  const t = PLAN_EX_BY_NAME[name] && PLAN_EX_BY_NAME[name].tracks;
+  return t === 'time' ? 'Hold time (s)' : t === 'bodyweight' ? 'Best reps' : `Weight (${settings.unit})`;
+}
+
+function svgBarChart(data) {
+  if (!data.length) return '';
+  const W = 320, H = 150, padL = 8, padR = 8, padT = 12, padB = 22;
+  const max = Math.max(...data.map((d) => d.value), 1);
+  const n = data.length, gap = 6;
+  const bw = (W - padL - padR - gap * (n - 1)) / n;
+  let out = '';
+  data.forEach((d, i) => {
+    const h = Math.max(2, (d.value / max) * (H - padT - padB));
+    const x = padL + i * (bw + gap), y = H - padB - h;
+    out += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="3" fill="var(--accent)" opacity="${(0.5 + 0.5 * (d.value / max)).toFixed(2)}"/>`;
+    out += `<text x="${(x + bw / 2).toFixed(1)}" y="${H - padB + 14}" text-anchor="middle" font-size="9" fill="var(--text-faint)">${escapeHtml(d.label)}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Volume per session">${out}</svg>`;
+}
+
+function svgLineChart(points) {
+  if (points.length < 2) return '<div class="empty">Log this exercise twice to see a trend.</div>';
+  const W = 320, H = 160, padL = 30, padR = 12, padT = 14, padB = 22;
+  const vals = points.map((p) => p.value);
+  let min = Math.min(...vals), max = Math.max(...vals);
+  if (min === max) { min -= 1; max += 1; }
+  const pad = (max - min) * 0.15; min -= pad; max += pad;
+  const n = points.length;
+  const px = (i) => padL + (i / (n - 1)) * (W - padL - padR);
+  const py = (v) => padT + (1 - (v - min) / (max - min)) * (H - padT - padB);
+
+  let grid = '';
+  [max - pad, (min + max) / 2, min + pad].forEach((v) => {
+    const y = py(v);
+    grid += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W - padR}" y2="${y.toFixed(1)}" stroke="var(--line)"/>`;
+    grid += `<text x="${padL - 5}" y="${(y + 3).toFixed(1)}" text-anchor="end" font-size="9" fill="var(--text-faint)">${Math.round(v)}</text>`;
+  });
+
+  const line = points.map((p, i) => `${i ? 'L' : 'M'}${px(i).toFixed(1)} ${py(p.value).toFixed(1)}`).join(' ');
+  const area = `${line} L${px(n - 1).toFixed(1)} ${H - padB} L${px(0).toFixed(1)} ${H - padB} Z`;
+  let dots = '';
+  points.forEach((p, i) => {
+    dots += `<circle cx="${px(i).toFixed(1)}" cy="${py(p.value).toFixed(1)}" r="3" fill="var(--accent)"/>`;
+    // label every point when few, else every other to avoid crowding
+    if (n <= 7 || i % 2 === 0) dots += `<text x="${px(i).toFixed(1)}" y="${H - padB + 14}" text-anchor="middle" font-size="9" fill="var(--text-faint)">${escapeHtml(p.label)}</text>`;
+  });
+
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Progress over time">
+    ${grid}
+    <path d="${area}" fill="var(--accent)" opacity="0.1"/>
+    <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+    ${dots}
+  </svg>`;
+}
+
 /* ================================================================== *
  * VIEW: Home / Dashboard
  * ================================================================== */
@@ -176,6 +344,41 @@ function renderHome() {
         <span class="pb-val">${bests[n].weight} <small>${settings.unit} × ${escapeHtml(String(bests[n].reps || '—'))}</small></span>
       </div>`).join('') : '';
 
+  // Ready-to-progress cards
+  const progs = allProgressions();
+  const progHtml = progs.length ? `
+    <div class="section-title">Ready to progress</div>
+    ${progs.map((p) => `
+      <div class="prog-card">
+        <div class="prog-i">⬆</div>
+        <div class="prog-main">
+          <div class="prog-name">${escapeHtml(p.name)}</div>
+          <div class="prog-detail">${escapeHtml(p.detail)}</div>
+        </div>
+        <div class="prog-next">${escapeHtml(p.label)}</div>
+      </div>`).join('')}` : '';
+
+  // Progress charts
+  const chartable = chartableExercises();
+  if (chartEx == null || !chartable.includes(chartEx)) chartEx = chartable[0] || null;
+  const volSeries = volumeSeries(10);
+  const chartsHtml = history.length ? `
+    <div class="section-title">Progress</div>
+    <div class="stat" style="padding:14px 14px 6px">
+      <div class="chart-cap">Workout volume <span class="muted">· last ${volSeries.length} session${volSeries.length > 1 ? 's' : ''}</span></div>
+      ${svgBarChart(volSeries)}
+    </div>
+    ${chartEx ? `
+    <div class="stat" style="padding:14px 14px 6px;margin-top:10px">
+      <div class="chart-cap" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <span id="chart-ex-label">${escapeHtml(metricLabel(chartEx))}</span>
+        <select id="chart-ex" class="mini-select" aria-label="Choose exercise">
+          ${chartable.map((n) => `<option value="${escapeHtml(n)}" ${n === chartEx ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}
+        </select>
+      </div>
+      <div id="chart-ex-body">${svgLineChart(exerciseSeries(chartEx))}</div>
+    </div>` : ''}` : '';
+
   document.getElementById('app').innerHTML = `
     <header class="app-header">
       <h1><span class="logo">${LOGO_SVG}</span> Lift Tracker</h1>
@@ -193,8 +396,12 @@ function renderHome() {
       <div class="stat"><div class="num">${fmtVol(s.totalVol)}</div><div class="lbl">Total ${settings.unit} lifted</div></div>
     </div>
 
+    ${progHtml}
+
     <div class="section-title">Start a workout</div>
     ${dayCards}
+
+    ${chartsHtml}
 
     <div class="section-title">Recent sessions</div>
     ${recent || '<div class="empty">No workouts logged yet. Pick a day above to start.</div>'}
@@ -210,6 +417,14 @@ function renderHome() {
     b.addEventListener('click', () => startWorkout(b.dataset.start)));
   const resumeBtn = $('[data-resume]');
   if (resumeBtn) resumeBtn.addEventListener('click', () => renderWorkout());
+
+  // progress line-chart exercise selector — swap just the chart body
+  const sel = $('#chart-ex');
+  if (sel) sel.addEventListener('change', () => {
+    chartEx = sel.value;
+    $('#chart-ex-body').innerHTML = svgLineChart(exerciseSeries(chartEx));
+    $('#chart-ex-label').textContent = metricLabel(chartEx);
+  });
 }
 
 /* ================================================================== *
@@ -271,6 +486,11 @@ function renderWorkout() {
     const repsLabel = isTime ? 'Secs/Reps' : 'Reps';
     const prev = last[ex.name];
 
+    const prog = progressionFor(ex.name);
+    const progHint = prog ? (prog.track === 'weight'
+      ? `<button class="prog-hint" data-applyprog="${ei}" data-progval="${prog.next}">⬆ Ready to progress — tap to load <b>${prog.next} ${settings.unit}</b></button>`
+      : `<div class="prog-hint static">⬆ Ready to progress — aim for <b>${escapeHtml(prog.label.replace('Try ', ''))}</b></div>`) : '';
+
     const rows = ex.sets.map((set, si) => `
       <div class="set-row ${set.done ? 'done' : ''}" data-ex="${ei}" data-set="${si}">
         <div class="set-n">${si + 1}</div>
@@ -296,6 +516,7 @@ function renderWorkout() {
           </div>
           ${ex.notes ? `<div class="ex-note">${escapeHtml(ex.notes)}</div>` : ''}
         </div>
+        ${progHint}
         <div class="set-head"><span>#</span><span>${hideWeight ? 'Load' : 'Weight'}</span><span>${repsLabel}</span><span>✓</span></div>
         <div class="sets" data-sets="${ei}">
           ${rows}
@@ -358,6 +579,17 @@ function wireWorkout() {
   // add set
   document.querySelectorAll('[data-addset]').forEach((b) =>
     b.addEventListener('click', () => addSet(num(b.dataset.addset))));
+
+  // apply a progression suggestion — load the new weight into unfinished sets
+  document.querySelectorAll('[data-applyprog]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const ei = num(b.dataset.applyprog);
+      const val = b.dataset.progval;
+      active.exercises[ei].sets.forEach((s) => { if (!s.done) s.weight = val; });
+      save(KEY.active, active);
+      renderWorkout();
+      toast(`Loaded ${val} ${settings.unit}`);
+    }));
 
   $('[data-finish]').addEventListener('click', finishWorkout);
   $('[data-discard]').addEventListener('click', discardWorkout);
@@ -477,6 +709,7 @@ function startTimer(seconds) {
   timer.endAt = Date.now() + seconds * 1000;
   timer.paused = false;
   timer.done = false;
+  timer.lastTick = null;
   buildTimerPresets();
   timerSheet.hidden = false;
   timerCount.classList.remove('done');
@@ -484,6 +717,7 @@ function startTimer(seconds) {
   pb.textContent = 'Pause';
   pb.classList.remove('paused');
   requestWakeLock();
+  soundStart();
   runInterval();
   tick();
 }
@@ -507,6 +741,13 @@ function tick() {
   ringProgress.style.strokeDasharray = RING_LEN;
   ringProgress.style.strokeDashoffset = RING_LEN * (1 - frac);
 
+  // Final 3-2-1 countdown blips (once per whole second).
+  const whole = Math.ceil(shown);
+  if (whole !== timer.lastTick) {
+    if (remain > 0 && whole >= 1 && whole <= 3) soundTick();
+    timer.lastTick = whole;
+  }
+
   if (remain <= 0) onTimerDone();
 }
 
@@ -517,7 +758,7 @@ function onTimerDone() {
   timerCount.textContent = 'Go!';
   timerCount.classList.add('done');
   ringProgress.style.strokeDashoffset = RING_LEN;
-  beep(3);
+  soundFinish();
   vibrate([200, 100, 200]);
   releaseWakeLock();
   // auto-close shortly after
@@ -588,32 +829,52 @@ document.getElementById('timer-pause').addEventListener('click', togglePause);
 document.getElementById('timer-skip').addEventListener('click', closeTimer);
 document.querySelector('[data-close-timer]').addEventListener('click', closeTimer);
 
-/* ---- Sound (Web Audio, generated — no files, works offline) ---- */
+/* ---- Sound (Web Audio, generated on the fly — no files, works offline) ---- */
 let audioCtx = null;
 function unlockAudio() {
-  if (!settings.sound) return;
   try {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === 'suspended') audioCtx.resume();
   } catch { /* no audio available */ }
 }
-function beep(times = 3) {
+// One shaped tone. `type` 'sine' is smooth; 'square' is a sharper tick.
+function tone(freq, start, dur, peak = 0.3, type = 'sine') {
+  if (!audioCtx) return;
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(freq, start);
+  o.connect(g); g.connect(audioCtx.destination);
+  g.gain.setValueAtTime(0.0001, start);
+  g.gain.exponentialRampToValueAtTime(peak, start + 0.015);
+  g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+  o.start(start); o.stop(start + dur + 0.03);
+}
+// Soft cue when a rest begins.
+function soundStart() {
+  if (!settings.sound) return;
+  unlockAudio(); if (!audioCtx) return;
+  tone(523, audioCtx.currentTime, 0.14, 0.16);
+}
+// Short blip for the final 3-2-1 countdown seconds.
+function soundTick() {
   if (!settings.sound || !audioCtx) return;
-  try {
-    let t = audioCtx.currentTime;
-    for (let i = 0; i < times; i++) {
-      const o = audioCtx.createOscillator();
-      const g = audioCtx.createGain();
-      o.type = 'sine';
-      o.frequency.value = i === times - 1 ? 1175 : 880; // last beep higher
-      o.connect(g); g.connect(audioCtx.destination);
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.35, t + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
-      o.start(t); o.stop(t + 0.24);
-      t += 0.3;
-    }
-  } catch { /* ignore */ }
+  tone(760, audioCtx.currentTime, 0.07, 0.22, 'square');
+}
+// Ascending 3-note chime when the rest ends.
+function soundFinish() {
+  if (!settings.sound || !audioCtx) return;
+  const t = audioCtx.currentTime;
+  tone(659, t, 0.16, 0.32);
+  tone(880, t + 0.18, 0.16, 0.34);
+  tone(1175, t + 0.36, 0.34, 0.42);
+}
+// Two-note preview used when toggling sound on in settings.
+function soundPreview() {
+  unlockAudio(); if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  tone(660, t, 0.12, 0.3);
+  tone(990, t + 0.15, 0.16, 0.32);
 }
 function vibrate(pattern) {
   if (settings.vibrate && navigator.vibrate) { try { navigator.vibrate(pattern); } catch {} }
@@ -648,7 +909,7 @@ function openSettings() {
         <input class="mini-input" id="set-rest" type="number" inputmode="numeric" value="${settings.rest}" />
       </div>
       <div class="settings-row">
-        <div><div class="sr-label">Beep when rest ends</div><div class="sr-sub">Generated tone, no download</div></div>
+        <div><div class="sr-label">Timer sounds</div><div class="sr-sub">Start cue, 3·2·1 countdown &amp; finish chime</div></div>
         <button class="toggle ${settings.sound ? 'on' : ''}" id="set-sound" role="switch" aria-checked="${settings.sound}"></button>
       </div>
       <div class="settings-row">
@@ -680,7 +941,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v1 · data stored on this device</p>
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v2 · data stored on this device</p>
   `;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
@@ -692,7 +953,7 @@ function openSettings() {
   });
   $('#set-sound').addEventListener('click', (e) => {
     settings.sound = !settings.sound; e.target.classList.toggle('on', settings.sound);
-    save(KEY.settings, settings); if (settings.sound) { unlockAudio(); setTimeout(() => beep(1), 60); }
+    save(KEY.settings, settings); if (settings.sound) soundPreview();
   });
   $('#set-vibe').addEventListener('click', (e) => {
     settings.vibrate = !settings.vibrate; e.target.classList.toggle('on', settings.vibrate);
@@ -739,6 +1000,10 @@ const LOGO_SVG = `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" xm
 
 // Restore mid-workout on reload if the user was in one.
 if (active) renderWorkout(); else renderHome();
+
+// Unlock the audio context on the first tap so the timer can make sound later
+// (iOS Safari blocks audio that didn't originate from a user gesture).
+window.addEventListener('pointerdown', () => unlockAudio(), { once: true });
 
 // When the user returns to the app during a rest, refresh the count instantly
 // (in case throttling let it drift) and re-acquire the wake lock.
