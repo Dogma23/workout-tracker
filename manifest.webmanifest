@@ -1,0 +1,14 @@
+{
+  "name": "Lift Tracker",
+  "short_name": "Lift",
+  "description": "Log your weights, rest between sets, and track your progress.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

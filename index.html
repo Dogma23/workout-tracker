@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0d1117" />
+  <title>Lift Tracker</title>
+
+  <!-- PWA: installable + offline -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Lift" />
+
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <!-- The whole app renders into #app from js/app.js -->
+  <div id="app"></div>
+
+  <!-- Rest timer overlay (hidden until a set is completed) -->
+  <div id="timer-sheet" class="sheet" hidden>
+    <div class="sheet-backdrop" data-close-timer></div>
+    <div class="sheet-body" role="dialog" aria-label="Rest timer">
+      <div class="timer-label">REST</div>
+      <div id="timer-count" class="timer-count">1:30</div>
+      <svg class="timer-ring" viewBox="0 0 120 120" aria-hidden="true">
+        <circle class="ring-track" cx="60" cy="60" r="54" />
+        <circle id="ring-progress" class="ring-progress" cx="60" cy="60" r="54" />
+      </svg>
+
+      <div class="timer-presets" id="timer-presets"></div>
+
+      <div class="timer-controls">
+        <button class="tbtn" id="timer-minus">−15s</button>
+        <button class="tbtn tbtn-pause" id="timer-pause">Pause</button>
+        <button class="tbtn" id="timer-plus">+15s</button>
+      </div>
+      <button class="btn btn-ghost timer-skip" id="timer-skip">Skip rest</button>
+    </div>
+  </div>
+
+  <script src="js/plan.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
