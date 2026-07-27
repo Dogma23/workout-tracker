@@ -4,13 +4,45 @@
    from here, so tweaking your program is just editing this list.
    ========================================================================= */
 
-// Shared 5-minute warm-up shown at the top of every session.
-const WARMUP = [
-  'Marching on the spot — 1 min',
-  'Arm circles, small to large — 1 min',
-  'Bodyweight glute bridges — 1 min',
-  'Cat-cow (spine mobility) — 1 min',
-  'Shoulder blade squeezes — 1 min',
+// A pool of 5-minute warm-ups. The app serves a different one each session and
+// cycles back to the start each week (see the rotation logic in app.js). All are
+// gentle and joint-friendly — no overhead pressing, deep knee loading or jumping.
+const WARMUPS = [
+  { name: 'Classic', steps: [
+    'Marching on the spot — 1 min',
+    'Arm circles, small to large — 1 min',
+    'Bodyweight glute bridges — 1 min',
+    'Cat-cow (spine mobility) — 1 min',
+    'Shoulder blade squeezes — 1 min',
+  ] },
+  { name: 'Mobility flow', steps: [
+    'Hip circles, hands on hips — 1 min',
+    'Ankle circles, both sides — 1 min',
+    'Seated thoracic rotations — 1 min',
+    'Standing hip hinges (light) — 1 min',
+    'Band pull-aparts (light) — 1 min',
+  ] },
+  { name: 'Activation', steps: [
+    'Glute bridges — 1 min',
+    'Dead bug — 1 min',
+    'Bird dog — 1 min',
+    'High-knee marching — 1 min',
+    'Scapular retractions (squeeze & hold) — 1 min',
+  ] },
+  { name: 'Cardio primer', steps: [
+    'Step-touch side to side — 1 min',
+    'Controlled arm swings (below shoulder) — 1 min',
+    'Bodyweight good-mornings (gentle hinge) — 1 min',
+    'Standing calf raises — 1 min',
+    'Gentle torso twists (below chest) — 1 min',
+  ] },
+  { name: 'Core & spine', steps: [
+    'Cat-cow — 1 min',
+    'Dead bug — 1 min',
+    'Bird dog — 1 min',
+    'Side-lying leg raises, each side — 1 min',
+    'Glute bridges — 1 min',
+  ] },
 ];
 
 /* Each day has an id, a name, a short subtitle and a list of exercises.

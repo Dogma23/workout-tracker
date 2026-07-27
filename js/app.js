@@ -15,6 +15,8 @@ const KEY = {
   history: 'wt_history_v1',
   active: 'wt_active_v1',
   last: 'wt_last_v1',            // last weight/reps used per exercise, for prefill
+  plan: 'wt_plan_v1',           // user-editable copy of the program (days + exercises)
+  warmup: 'wt_warmup_v1',       // warm-up rotation pointer { weekKey, count }
 };
 
 const load = (k, fallback) => {
@@ -34,7 +36,14 @@ let last = load(KEY.last, {});
 let active = load(KEY.active, null);   // in-progress session or null
 let chartEx = null;                    // exercise selected in the progress line chart
 
+// User-editable program, seeded from the built-in default (plan.js) on first run.
+// Shape: { order: [dayId...], days: { dayId: {id,name,day,subtitle,exercises:[...]} } }
+const seedPlan = () => ({ order: PLAN_ORDER.slice(), days: JSON.parse(JSON.stringify(PLAN)) });
+let userPlan = load(KEY.plan, null) || seedPlan();
+const savePlan = () => save(KEY.plan, userPlan);
+
 const REST_PRESETS = [30, 45, 60, 90, 120, 180];
+const TRACK_LABELS = { weight: 'Weighted', bodyweight: 'Bodyweight', time: 'Time / hold' };
 
 /* ------------------------------------------------------------------ *
  * Small utilities
@@ -134,11 +143,23 @@ function personalBests() {
  * (a small weight bump, or +1 rep / +5s for bodyweight moves & holds).
  * ------------------------------------------------------------------ */
 
-// First plan definition of each exercise, looked up by name.
-const PLAN_EX_BY_NAME = {};
-PLAN_ORDER.forEach((id) => PLAN[id].exercises.forEach((ex) => {
-  if (!PLAN_EX_BY_NAME[ex.name]) PLAN_EX_BY_NAME[ex.name] = ex;
-}));
+// Look up an exercise's current definition by name (searches the user's plan).
+function exDef(name) {
+  for (const id of userPlan.order) {
+    const d = userPlan.days[id];
+    const e = d && d.exercises.find((x) => x.name === name);
+    if (e) return e;
+  }
+  return null;
+}
+// All unique exercise names across the plan, in order.
+function allExNames() {
+  const names = [];
+  userPlan.order.forEach((id) => userPlan.days[id].exercises.forEach((e) => {
+    if (!names.includes(e.name)) names.push(e.name);
+  }));
+  return names;
+}
 
 // Top of a target range, e.g. "10–12" -> 12, "20 sec each side" -> 20.
 function targetTop(repsStr) {
@@ -164,7 +185,7 @@ const weightStep = () => (settings.unit === 'kg' ? 2.5 : 5);
 
 // Is this exercise ready to progress? Returns a suggestion object, or null.
 function progressionFor(name) {
-  const plan = PLAN_EX_BY_NAME[name];
+  const plan = exDef(name);
   if (!plan) return null;
   const track = plan.tracks;
   if (/min/i.test(plan.reps)) return null;   // skip steady cardio (e.g. "10 min")
@@ -210,7 +231,7 @@ function progressionFor(name) {
 }
 
 function allProgressions() {
-  return Object.keys(PLAN_EX_BY_NAME).map(progressionFor).filter(Boolean);
+  return allExNames().map(progressionFor).filter(Boolean);
 }
 
 /* ------------------------------------------------------------------ *
@@ -226,7 +247,7 @@ function volumeSeries(limit = 10) {
 }
 
 function exerciseSeries(name) {
-  const plan = PLAN_EX_BY_NAME[name];
+  const plan = exDef(name);
   const track = plan ? plan.tracks : 'weight';
   return history.slice().reverse()
     .map((h) => ({ date: h.date, ex: h.exercises.find((e) => e.name === name) }))
@@ -236,11 +257,12 @@ function exerciseSeries(name) {
 }
 
 function chartableExercises() {
-  return Object.keys(PLAN_EX_BY_NAME).filter((n) => exerciseSeries(n).length >= 2);
+  return allExNames().filter((n) => exerciseSeries(n).length >= 2);
 }
 
 function metricLabel(name) {
-  const t = PLAN_EX_BY_NAME[name] && PLAN_EX_BY_NAME[name].tracks;
+  const d = exDef(name);
+  const t = d && d.tracks;
   return t === 'time' ? 'Hold time (s)' : t === 'bodyweight' ? 'Best reps' : `Weight (${settings.unit})`;
 }
 
@@ -303,40 +325,43 @@ function renderHome() {
   const bests = personalBests();
   const bestNames = Object.keys(bests);
 
+  const activeDay = active && userPlan.days[active.dayId];
   const resumeHtml = active ? `
     <div class="resume">
       <div>
         <div class="r-title">Workout in progress</div>
-        <div class="r-sub">${escapeHtml(PLAN[active.dayId].name)} · started ${fmtDate(active.startedAt)}</div>
+        <div class="r-sub">${escapeHtml(activeDay ? activeDay.name : active.dayName)} · started ${fmtDate(active.startedAt)}</div>
       </div>
       <button class="btn" data-resume>Resume</button>
     </div>` : '';
 
-  const dayCards = PLAN_ORDER.map((id) => {
-    const d = PLAN[id];
+  const dayCards = userPlan.order.map((id) => {
+    const d = userPlan.days[id];
     return `
-      <button class="day-card" data-start="${id}">
-        <span class="badge">${escapeHtml(d.name[0])}</span>
-        <span>
-          <div class="dc-name">${escapeHtml(d.name)}</div>
-          <div class="dc-sub">${escapeHtml(d.subtitle)}</div>
-          <div class="dc-meta">${d.day} · ${d.exercises.length} exercises</div>
-        </span>
-        <span class="chev">›</span>
-      </button>`;
+      <div class="day-card">
+        <button class="dc-hit" data-start="${id}">
+          <span class="badge">${escapeHtml(d.name[0])}</span>
+          <span class="dc-text">
+            <div class="dc-name">${escapeHtml(d.name)}</div>
+            <div class="dc-sub">${escapeHtml(d.subtitle)}</div>
+            <div class="dc-meta">${escapeHtml(d.day)} · ${d.exercises.length} exercises</div>
+          </span>
+        </button>
+        <button class="dc-edit" data-editday="${id}" aria-label="Edit ${escapeHtml(d.name)}">✎</button>
+      </div>`;
   }).join('');
 
   const recent = history.slice(0, 5).map((h) => `
-    <div class="hist-item">
+    <button class="hist-item" data-editsession="${h.id}">
       <div>
-        <div class="h-day">${escapeHtml(PLAN[h.dayId] ? PLAN[h.dayId].name : h.dayName || 'Workout')}</div>
+        <div class="h-day">${escapeHtml(userPlan.days[h.dayId] ? userPlan.days[h.dayId].name : h.dayName || 'Workout')}</div>
         <div class="h-date">${fmtDate(h.date)}${h.durationSec ? ' · ' + Math.round(h.durationSec / 60) + ' min' : ''}</div>
       </div>
       <div class="h-vol">
         <div class="v">${fmtVol(h.volume != null ? h.volume : sessionVolume(h))} ${settings.unit}</div>
-        <div class="l">volume</div>
+        <div class="l">volume ›</div>
       </div>
-    </div>`).join('');
+    </button>`).join('');
 
   const bestsHtml = bestNames.length ? bestNames.map((n) => `
       <div class="pb-row">
@@ -400,6 +425,7 @@ function renderHome() {
 
     <div class="section-title">Start a workout</div>
     ${dayCards}
+    <button class="btn btn-ghost btn-block mt8" data-customize>✎ Customize exercises</button>
 
     ${chartsHtml}
 
@@ -415,6 +441,11 @@ function renderHome() {
   $('[data-settings]').addEventListener('click', openSettings);
   document.querySelectorAll('[data-start]').forEach((b) =>
     b.addEventListener('click', () => startWorkout(b.dataset.start)));
+  document.querySelectorAll('[data-editday]').forEach((b) =>
+    b.addEventListener('click', () => renderDayEditor(b.dataset.editday)));
+  document.querySelectorAll('[data-editsession]').forEach((b) =>
+    b.addEventListener('click', () => renderSessionEditor(b.dataset.editsession)));
+  $('[data-customize]').addEventListener('click', renderPlanPicker);
   const resumeBtn = $('[data-resume]');
   if (resumeBtn) resumeBtn.addEventListener('click', () => renderWorkout());
 
@@ -428,19 +459,41 @@ function renderHome() {
 }
 
 /* ================================================================== *
+ * Warm-up rotation — a different warm-up each session, cycling back to
+ * the first at the start of each new week ("repeats once the week is over").
+ * ================================================================== */
+function weekKey(d = new Date()) {
+  const x = new Date(d);
+  const dow = (x.getDay() + 6) % 7;   // Monday = 0
+  x.setHours(0, 0, 0, 0);
+  x.setDate(x.getDate() - dow);       // back to this week's Monday
+  return x.toISOString().slice(0, 10);
+}
+function nextWarmupIndex() {
+  const wk = weekKey();
+  const st = load(KEY.warmup, { weekKey: wk, count: 0 });
+  if (st.weekKey !== wk) { st.weekKey = wk; st.count = 0; }   // new week -> restart
+  const idx = st.count % WARMUPS.length;
+  st.count += 1;
+  save(KEY.warmup, st);
+  return idx;
+}
+
+/* ================================================================== *
  * Start / build a workout session
  * ================================================================== */
 function startWorkout(dayId) {
   if (active && active.dayId !== dayId) {
     if (!confirm('You have an unfinished workout. Discard it and start a new one?')) return;
   }
-  const day = PLAN[dayId];
+  const day = userPlan.days[dayId];
   active = {
     id: uid(),
     dayId,
     dayName: day.name,
     startedAt: Date.now(),
     rest: settings.rest,
+    warmupIndex: nextWarmupIndex(),
     exercises: day.exercises.map((ex) => ({
       name: ex.name,
       target: `${ex.sets} × ${ex.reps}`,
@@ -467,16 +520,17 @@ function startWorkout(dayId) {
 function renderWorkout() {
   if (!active) return renderHome();
 
-  const day = PLAN[active.dayId];
+  const day = userPlan.days[active.dayId] || { name: active.dayName, day: '', subtitle: '' };
 
   const restChips = [60, 90, 120, 180].map((n) =>
     `<button class="chip ${active.rest === n ? 'active' : ''}" data-rest="${n}">${n}s</button>`
   ).join('') + `<button class="chip ${!REST_PRESETS.includes(active.rest) && active.rest ? 'active' : ''}" data-rest-custom>${!REST_PRESETS.includes(active.rest) ? active.rest + 's' : '···'}</button>`;
 
+  const wu = WARMUPS[active.warmupIndex] || WARMUPS[0];
   const warmup = `
     <details class="warmup">
-      <summary><span class="wu-i">▲</span> Warm-up · 5 min <span style="margin-left:auto;color:var(--text-faint);font-size:12px;font-weight:500">tap to expand</span></summary>
-      <ol>${WARMUP.map((w) => `<li>${escapeHtml(w)}</li>`).join('')}</ol>
+      <summary><span class="wu-i">▲</span> Warm-up · ${escapeHtml(wu.name)} · 5 min <span style="margin-left:auto;color:var(--text-faint);font-size:12px;font-weight:500">tap to expand</span></summary>
+      <ol>${wu.steps.map((w) => `<li>${escapeHtml(w)}</li>`).join('')}</ol>
     </details>`;
 
   const exBlocks = active.exercises.map((ex, ei) => {
@@ -691,6 +745,222 @@ function discardWorkout() {
   localStorage.removeItem(KEY.active);
   stopTimer(true);
   renderHome();
+}
+
+/* ================================================================== *
+ * PLAN EDITOR — custom exercises + reordering (persists to the plan)
+ * ================================================================== */
+function renderPlanPicker() {
+  const cards = userPlan.order.map((id) => {
+    const d = userPlan.days[id];
+    return `
+      <div class="day-card">
+        <button class="dc-hit" data-editday="${id}">
+          <span class="badge">${escapeHtml(d.name[0])}</span>
+          <span class="dc-text">
+            <div class="dc-name">${escapeHtml(d.name)}</div>
+            <div class="dc-meta">${d.exercises.length} exercises</div>
+          </span>
+        </button>
+        <span class="chev">›</span>
+      </div>`;
+  }).join('');
+  document.getElementById('app').innerHTML = `
+    <header class="app-header">
+      <button class="icon-btn" data-back aria-label="Back">‹</button>
+      <div class="wk-head" style="flex:1"><div class="wk-title">Customize exercises</div></div>
+    </header>
+    <p class="muted" style="font-size:13px;margin:0 2px 14px">Pick a day to add, edit, reorder or remove exercises. Changes apply to your next workout.</p>
+    ${cards}
+  `;
+  $('[data-back]').addEventListener('click', renderHome);
+  document.querySelectorAll('[data-editday]').forEach((b) =>
+    b.addEventListener('click', () => renderDayEditor(b.dataset.editday)));
+}
+
+function renderDayEditor(dayId) {
+  const d = userPlan.days[dayId];
+  const rows = d.exercises.map((ex, i) => `
+    <div class="edit-row">
+      <div class="edit-main">
+        <div class="edit-name">${escapeHtml(ex.name)}</div>
+        <div class="edit-meta">${ex.sets} × ${escapeHtml(ex.reps)} · ${TRACK_LABELS[ex.tracks] || ex.tracks}</div>
+      </div>
+      <div class="edit-actions">
+        <button class="mini-btn" data-up="${i}" ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
+        <button class="mini-btn" data-down="${i}" ${i === d.exercises.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button>
+        <button class="mini-btn" data-editex="${i}" aria-label="Edit">✎</button>
+        <button class="mini-btn danger" data-delex="${i}" aria-label="Delete">✕</button>
+      </div>
+    </div>`).join('');
+
+  document.getElementById('app').innerHTML = `
+    <header class="app-header">
+      <button class="icon-btn" data-back aria-label="Back">‹</button>
+      <div class="wk-head" style="flex:1;flex-direction:column;align-items:flex-start;gap:0">
+        <div class="wk-title">${escapeHtml(d.name)}</div>
+        <div class="wk-sub">Edit exercises</div>
+      </div>
+    </header>
+    ${rows || '<div class="empty">No exercises yet. Add one below.</div>'}
+    <button class="btn btn-block mt16" data-addex>+ Add exercise</button>
+    <button class="btn btn-ghost btn-block mt8" data-resetday>Reset this day to default</button>
+    <p class="center muted mt16" style="font-size:12px">Changes apply to your next workout, not one in progress.</p>
+  `;
+  $('[data-back]').addEventListener('click', renderPlanPicker);
+  document.querySelectorAll('[data-up]').forEach((b) => b.addEventListener('click', () => moveEx(dayId, +b.dataset.up, -1)));
+  document.querySelectorAll('[data-down]').forEach((b) => b.addEventListener('click', () => moveEx(dayId, +b.dataset.down, +1)));
+  document.querySelectorAll('[data-editex]').forEach((b) => b.addEventListener('click', () => renderExerciseForm(dayId, +b.dataset.editex)));
+  document.querySelectorAll('[data-delex]').forEach((b) => b.addEventListener('click', () => delEx(dayId, +b.dataset.delex)));
+  $('[data-addex]').addEventListener('click', () => renderExerciseForm(dayId, null));
+  $('[data-resetday]').addEventListener('click', (e) => armThen(e.target, 'Tap again to reset', () => {
+    if (PLAN[dayId]) userPlan.days[dayId] = JSON.parse(JSON.stringify(PLAN[dayId]));
+    savePlan(); renderDayEditor(dayId); toast('Reset to default');
+  }));
+}
+
+function moveEx(dayId, i, dir) {
+  const arr = userPlan.days[dayId].exercises;
+  const j = i + dir;
+  if (j < 0 || j >= arr.length) return;
+  [arr[i], arr[j]] = [arr[j], arr[i]];
+  savePlan();
+  renderDayEditor(dayId);
+}
+
+function delEx(dayId, i) {
+  const btn = document.querySelector(`[data-delex="${i}"]`);
+  armThen(btn, '✓?', () => {
+    userPlan.days[dayId].exercises.splice(i, 1);
+    savePlan(); renderDayEditor(dayId); toast('Exercise removed');
+  });
+}
+
+function renderExerciseForm(dayId, idx) {
+  const editing = idx != null;
+  const ex = editing ? userPlan.days[dayId].exercises[idx]
+    : { name: '', sets: 3, reps: '12', tracks: 'weight', notes: '' };
+  document.getElementById('app').innerHTML = `
+    <header class="app-header">
+      <button class="icon-btn" data-back aria-label="Back">‹</button>
+      <div class="wk-head" style="flex:1"><div class="wk-title">${editing ? 'Edit exercise' : 'Add exercise'}</div></div>
+    </header>
+    <div class="form">
+      <label class="fld"><span>Name</span>
+        <input id="f-name" type="text" value="${escapeHtml(ex.name)}" placeholder="e.g. Seated Cable Row" /></label>
+      <div class="fld-row">
+        <label class="fld"><span>Sets</span>
+          <input id="f-sets" type="number" inputmode="numeric" min="1" max="10" value="${ex.sets}" /></label>
+        <label class="fld"><span>Reps / target</span>
+          <input id="f-reps" type="text" value="${escapeHtml(ex.reps)}" placeholder="e.g. 10–12" /></label>
+      </div>
+      <label class="fld"><span>Type</span>
+        <select id="f-tracks">
+          <option value="weight" ${ex.tracks === 'weight' ? 'selected' : ''}>Weighted (weight + reps)</option>
+          <option value="bodyweight" ${ex.tracks === 'bodyweight' ? 'selected' : ''}>Bodyweight (reps)</option>
+          <option value="time" ${ex.tracks === 'time' ? 'selected' : ''}>Time / hold (seconds)</option>
+        </select></label>
+      <label class="fld"><span>Notes (optional)</span>
+        <input id="f-notes" type="text" value="${escapeHtml(ex.notes || '')}" placeholder="Coaching cue / injury note" /></label>
+      <button class="btn btn-block btn-lg mt16" data-save>${editing ? 'Save changes' : 'Add exercise'}</button>
+    </div>
+  `;
+  $('[data-back]').addEventListener('click', () => renderDayEditor(dayId));
+  $('[data-save]').addEventListener('click', () => {
+    const name = $('#f-name').value.trim();
+    if (!name) { toast('Give it a name'); $('#f-name').focus(); return; }
+    const rec = {
+      name,
+      sets: Math.max(1, Math.min(10, Math.round(num($('#f-sets').value)) || 1)),
+      reps: $('#f-reps').value.trim() || '10',
+      tracks: $('#f-tracks').value,
+      notes: $('#f-notes').value.trim(),
+    };
+    if (editing) userPlan.days[dayId].exercises[idx] = rec;
+    else userPlan.days[dayId].exercises.push(rec);
+    savePlan();
+    renderDayEditor(dayId);
+    toast(editing ? 'Saved' : 'Added');
+  });
+}
+
+/* ================================================================== *
+ * SESSION EDITOR — edit or delete a past workout
+ * ================================================================== */
+function renderSessionEditor(id) {
+  const idx = history.findIndex((h) => h.id === id);
+  if (idx < 0) return renderHome();
+  const h = history[idx];
+  const dayName = userPlan.days[h.dayId] ? userPlan.days[h.dayId].name : (h.dayName || 'Workout');
+
+  const exBlocks = h.exercises.map((ex, ei) => {
+    const rows = ex.sets.map((set, si) => `
+      <div class="set-row ${set.done ? 'done' : ''}" data-ex="${ei}" data-set="${si}">
+        <div class="set-n">${si + 1}</div>
+        <div class="field"><input type="number" inputmode="decimal" step="0.5" value="${set.weight}" data-field="weight" placeholder="0" aria-label="Weight" /><span class="unit">${settings.unit}</span></div>
+        <div class="field"><input type="number" inputmode="numeric" value="${set.reps}" data-field="reps" placeholder="0" aria-label="Reps" /><span class="unit">reps</span></div>
+        <button class="set-check ${set.done ? 'on' : ''}" data-check aria-label="Toggle counted">✓</button>
+      </div>`).join('');
+    return `
+      <div class="exercise">
+        <div class="ex-head"><div class="ex-title-row"><span class="ex-name">${escapeHtml(ex.name)}</span></div></div>
+        <div class="set-head"><span>#</span><span>Weight</span><span>Reps</span><span>✓</span></div>
+        <div class="sets">${rows}</div>
+      </div>`;
+  }).join('');
+
+  document.getElementById('app').innerHTML = `
+    <header class="app-header">
+      <button class="icon-btn" data-back aria-label="Back">‹</button>
+      <div class="wk-head" style="flex:1;flex-direction:column;align-items:flex-start;gap:0">
+        <div class="wk-title">${escapeHtml(dayName)}</div>
+        <div class="wk-sub">${fmtDate(h.date)}</div>
+      </div>
+    </header>
+    <p class="muted" style="font-size:13px;margin:0 2px 12px">Edit logged weights and reps, or toggle whether a set counts. Volume updates automatically.</p>
+    ${exBlocks}
+    <div class="finish-bar">
+      <button class="btn btn-danger" data-delsession style="flex:0 0 auto">Delete</button>
+      <button class="btn btn-block btn-lg" data-donesession>Done</button>
+    </div>
+  `;
+
+  const persist = () => { h.volume = sessionVolume(h); save(KEY.history, history); };
+  $('[data-back]').addEventListener('click', () => { persist(); renderHome(); });
+  $('[data-donesession]').addEventListener('click', () => { persist(); toast('Saved'); renderHome(); });
+  document.querySelectorAll('.set-row input').forEach((inp) => inp.addEventListener('input', (e) => {
+    const row = e.target.closest('.set-row');
+    h.exercises[+row.dataset.ex].sets[+row.dataset.set][e.target.dataset.field] = e.target.value;
+    persist();
+  }));
+  document.querySelectorAll('[data-check]').forEach((b) => b.addEventListener('click', (e) => {
+    const row = e.target.closest('.set-row');
+    const s = h.exercises[+row.dataset.ex].sets[+row.dataset.set];
+    s.done = !s.done;
+    e.target.classList.toggle('on', s.done);
+    row.classList.toggle('done', s.done);
+    persist();
+  }));
+  $('[data-delsession]').addEventListener('click', (e) => armThen(e.target, 'Confirm delete', () => {
+    history.splice(idx, 1);
+    save(KEY.history, history);
+    toast('Session deleted');
+    renderHome();
+  }));
+}
+
+// Two-tap confirm for a destructive button: first tap arms it (label changes),
+// a second tap within 3s runs the action. Avoids native confirm() dialogs.
+function armThen(btn, armedLabel, action) {
+  if (!btn) return;
+  if (btn.dataset.armed) { action(); return; }
+  const original = btn.textContent;
+  btn.dataset.armed = '1';
+  btn.textContent = armedLabel;
+  btn.classList.add('armed');
+  setTimeout(() => {
+    if (btn && btn.dataset.armed) { btn.dataset.armed = ''; btn.textContent = original; btn.classList.remove('armed'); }
+  }, 3000);
 }
 
 /* ================================================================== *
@@ -941,7 +1211,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v2 · data stored on this device</p>
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v3 · data stored on this device</p>
   `;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
@@ -967,16 +1237,16 @@ function openSettings() {
   $('#set-reset').addEventListener('click', () => {
     if (!confirm('Delete ALL workout history and settings? This cannot be undone.')) return;
     if (!confirm('Really reset everything?')) return;
-    [KEY.history, KEY.active, KEY.last, KEY.settings].forEach((k) => localStorage.removeItem(k));
+    [KEY.history, KEY.active, KEY.last, KEY.settings, KEY.plan, KEY.warmup].forEach((k) => localStorage.removeItem(k));
     settings = Object.assign({}, DEFAULT_SETTINGS);
-    history = []; last = {}; active = null;
+    history = []; last = {}; active = null; userPlan = seedPlan();
     toast('All data cleared');
     renderHome();
   });
 }
 
 function exportData() {
-  const blob = new Blob([JSON.stringify({ history, last, settings, exportedAt: new Date().toISOString() }, null, 2)],
+  const blob = new Blob([JSON.stringify({ history, last, settings, plan: userPlan, exportedAt: new Date().toISOString() }, null, 2)],
     { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
