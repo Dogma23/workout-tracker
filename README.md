@@ -51,6 +51,14 @@ change so the offline copy refreshes.
 
 ## Roadmap ideas
 
+- **Rotating warm-ups** — instead of one fixed warm-up, keep a pool of warm-up
+  variants and serve a different one each session, cycling so the set repeats
+  once the week is over (weekly rotation). Keeps the warm-up fresh and varied.
+- **Hydration reminders** — nudge to drink water at a regular interval during a
+  session (configurable, e.g. every 10–15 min), with a gentle sound/vibrate.
+- **Total workout time** — a live elapsed-time clock on the active workout
+  screen, plus a cumulative "total time trained" stat on the dashboard.
+  (Per-session duration is already recorded — this surfaces it live and in total.)
 - Per-set RPE / "felt easy?" tagging to sharpen the progression suggestions
 - Custom exercises and reordering
 - Editing or deleting a past session
