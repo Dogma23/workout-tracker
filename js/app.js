@@ -28,7 +28,7 @@ const save = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 /* ------------------------------------------------------------------ *
  * App state
  * ------------------------------------------------------------------ */
-const DEFAULT_SETTINGS = { rest: 90, sound: true, vibrate: true, unit: 'kg' };
+const DEFAULT_SETTINGS = { rest: 90, sound: true, vibrate: true, unit: 'kg', hydration: true, hydrationMin: 15 };
 
 let settings = Object.assign({}, DEFAULT_SETTINGS, load(KEY.settings, {}));
 let history = load(KEY.history, []);
@@ -82,6 +82,23 @@ function fmtVol(v) {
   return String(Math.round(v));
 }
 
+// Live elapsed time (mm:ss, or h:mm:ss past an hour) for the active workout.
+function fmtElapsed(sec) {
+  sec = Math.max(0, Math.floor(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  if (h) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// Coarse duration for totals (e.g. "3h 42m", "45m").
+function fmtDuration(sec) {
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
+  if (h && m) return `${h}h ${m}m`;
+  if (h) return `${h}h`;
+  return `${m}m`;
+}
+
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
@@ -89,13 +106,13 @@ function escapeHtml(str) {
 }
 
 let toastTimer;
-function toast(msg) {
+function toast(msg, ms = 1800) {
   let el = $('#toast');
   if (!el) { el = document.createElement('div'); el.id = 'toast'; el.className = 'toast'; document.body.appendChild(el); }
   el.textContent = msg;
   requestAnimationFrame(() => el.classList.add('show'));
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
+  toastTimer = setTimeout(() => el.classList.remove('show'), ms);
 }
 
 /* ------------------------------------------------------------------ *
@@ -110,6 +127,9 @@ function stats() {
   let totalVol = 0;
   history.forEach((h) => { totalVol += (h.volume != null ? h.volume : sessionVolume(h)); });
 
+  let totalTime = 0;
+  history.forEach((h) => { totalTime += (h.durationSec || 0); });
+
   // Streak = consecutive calendar days (counting back from today/yesterday) with a workout.
   const days = new Set(history.map((h) => new Date(h.date).toDateString()));
   let streak = 0;
@@ -118,7 +138,7 @@ function stats() {
   if (!days.has(cur.toDateString())) cur.setDate(cur.getDate() - 1);
   while (days.has(cur.toDateString())) { streak++; cur.setDate(cur.getDate() - 1); }
 
-  return { total, thisWeek, totalVol, streak };
+  return { total, thisWeek, totalVol, streak, totalTime };
 }
 
 // Best (heaviest single logged set) per exercise across all history.
@@ -420,6 +440,7 @@ function renderHome() {
       <div class="stat"><div class="num">${s.thisWeek}</div><div class="lbl">This week</div></div>
       <div class="stat blue"><div class="num">${s.streak}</div><div class="lbl">Day streak</div></div>
       <div class="stat"><div class="num">${fmtVol(s.totalVol)}</div><div class="lbl">Total ${settings.unit} lifted</div></div>
+      <div class="stat wide"><div class="num">${fmtDuration(s.totalTime)}</div><div class="lbl">Total time trained</div></div>
     </div>
 
     ${progHtml}
@@ -488,6 +509,7 @@ function startWorkout(dayId) {
   if (active && active.dayId !== dayId) {
     if (!confirm('You have an unfinished workout. Discard it and start a new one?')) return;
   }
+  unlockAudio();   // this tap lets the timer/hydration sounds play later
   const day = userPlan.days[dayId];
   active = {
     id: uid(),
@@ -589,6 +611,7 @@ function renderWorkout() {
         <div class="wk-title">${escapeHtml(day.name)}</div>
         <div class="wk-sub">${day.day} · ${escapeHtml(day.subtitle)}</div>
       </div>
+      <div class="wk-elapsed" id="wk-elapsed" aria-label="Elapsed workout time">0:00</div>
     </header>
 
     <div class="wk-timerbar">
@@ -606,6 +629,51 @@ function renderWorkout() {
   `;
 
   wireWorkout();
+  startWorkoutClock();
+}
+
+/* ------------------------------------------------------------------ *
+ * Workout clock — ticks once a second while the workout view is open.
+ * Updates the elapsed display and drives hydration reminders. It stops
+ * itself when the workout view is gone (element missing / no active).
+ * ------------------------------------------------------------------ */
+let workoutClock = 0;
+function startWorkoutClock() {
+  clearInterval(workoutClock);
+  const tickClock = () => {
+    const el = document.getElementById('wk-elapsed');
+    if (!el || !active) { clearInterval(workoutClock); return; }
+    el.textContent = fmtElapsed((Date.now() - active.startedAt) / 1000);
+    maybeHydrate();
+  };
+  tickClock();
+  workoutClock = setInterval(tickClock, 1000);
+}
+
+/* ------------------------------------------------------------------ *
+ * Hydration reminders — nudge to drink water every N minutes during a
+ * workout. Scheduled off `active.hydrationNext` so it survives reloads.
+ * ------------------------------------------------------------------ */
+function maybeHydrate() {
+  if (!active) return;
+  if (!settings.hydration) { active.hydrationNext = null; return; }
+  const intervalMs = (settings.hydrationMin || 15) * 60000;
+  if (!active.hydrationNext) {          // (re)start the schedule from now
+    active.hydrationNext = Date.now() + intervalMs;
+    save(KEY.active, active);
+    return;
+  }
+  if (Date.now() >= active.hydrationNext) {
+    active.hydrationNext = Date.now() + intervalMs;
+    save(KEY.active, active);
+    hydrationNudge();
+  }
+}
+
+function hydrationNudge() {
+  toast('💧 Time to drink some water', 3200);
+  soundHydration();
+  vibrate([120, 80, 120]);
 }
 
 function wireWorkout() {
@@ -737,7 +805,7 @@ function finishWorkout() {
   active = null;
   localStorage.removeItem(KEY.active);
   stopTimer(true);
-  toast(`Saved · ${fmtVol(session.volume)} ${settings.unit} lifted 💪`);
+  toast(`Saved · ${fmtDuration(session.durationSec)} · ${fmtVol(session.volume)} ${settings.unit} 💪`);
   renderHome();
 }
 
@@ -1217,6 +1285,13 @@ function soundPreview() {
   tone(660, t, 0.12, 0.3);
   tone(990, t + 0.15, 0.16, 0.32);
 }
+// Gentle descending two-note cue for hydration reminders (distinct from rest).
+function soundHydration() {
+  if (!settings.sound || !audioCtx) return;
+  const t = audioCtx.currentTime;
+  tone(988, t, 0.16, 0.26);
+  tone(659, t + 0.18, 0.24, 0.26);
+}
 function vibrate(pattern) {
   if (settings.vibrate && navigator.vibrate) { try { navigator.vibrate(pattern); } catch {} }
 }
@@ -1259,6 +1334,18 @@ function openSettings() {
       </div>
     </div>
 
+    <div class="section-title">Hydration</div>
+    <div class="stat" style="padding:4px 16px">
+      <div class="settings-row">
+        <div><div class="sr-label">Water reminders</div><div class="sr-sub">Nudge you to drink during a workout</div></div>
+        <button class="toggle ${settings.hydration ? 'on' : ''}" id="set-hydration" role="switch" aria-checked="${settings.hydration}"></button>
+      </div>
+      <div class="settings-row">
+        <div><div class="sr-label">Remind every</div><div class="sr-sub">Minutes between reminders</div></div>
+        <input class="mini-input" id="set-hydration-min" type="number" inputmode="numeric" value="${settings.hydrationMin}" />
+      </div>
+    </div>
+
     <div class="section-title">Units</div>
     <div class="stat" style="padding:4px 16px">
       <div class="settings-row">
@@ -1282,7 +1369,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v5 · data stored on this device</p>
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v6 · data stored on this device</p>
   `;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
@@ -1299,6 +1386,15 @@ function openSettings() {
   $('#set-vibe').addEventListener('click', (e) => {
     settings.vibrate = !settings.vibrate; e.target.classList.toggle('on', settings.vibrate);
     save(KEY.settings, settings); if (settings.vibrate) vibrate(80);
+  });
+  $('#set-hydration').addEventListener('click', (e) => {
+    settings.hydration = !settings.hydration; e.target.classList.toggle('on', settings.hydration);
+    save(KEY.settings, settings); if (settings.hydration) unlockAudio();
+  });
+  $('#set-hydration-min').addEventListener('change', (e) => {
+    settings.hydrationMin = Math.max(1, Math.min(120, Math.round(num(e.target.value)) || 15));
+    e.target.value = settings.hydrationMin;
+    save(KEY.settings, settings);
   });
   document.querySelectorAll('[data-unit]').forEach((b) =>
     b.addEventListener('click', () => {

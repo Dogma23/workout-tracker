@@ -124,6 +124,24 @@ input { font-family: inherit; }
 .stat .lbl { font-size: 12.5px; color: var(--text-dim); margin-top: 2px; text-transform: uppercase; letter-spacing: .04em; }
 .stat.accent .num { color: var(--accent); }
 .stat.blue .num { color: var(--accent-2); }
+.stat.wide { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 10px; }
+.stat.wide .num { color: var(--accent-2); }
+.stat.wide .lbl { margin-top: 0; }
+
+/* live elapsed clock in the workout header */
+.wk-elapsed {
+  flex: 0 0 auto;
+  align-self: center;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.wk-elapsed::before { content: '⏱ '; font-weight: 400; }
 
 /* ---------- Section headings ---------- */
 .section-title {
@@ -625,8 +643,9 @@ input { font-family: inherit; }
 
 /* toast */
 .toast {
-  position: fixed; left: 50%; bottom: calc(20px + var(--safe-bottom));
+  position: fixed; left: 50%; bottom: calc(96px + var(--safe-bottom));
   transform: translateX(-50%) translateY(20px);
+  max-width: calc(100% - 32px); text-align: center;
   background: var(--bg-elev-2); color: var(--text);
   border: 1px solid var(--line); border-radius: 999px;
   padding: 11px 20px; font-size: 14px; font-weight: 600;
