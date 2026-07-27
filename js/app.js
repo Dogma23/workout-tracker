@@ -803,11 +803,13 @@ function renderDayEditor(dayId) {
       </div>
     </header>
     ${rows || '<div class="empty">No exercises yet. Add one below.</div>'}
-    <button class="btn btn-block mt16" data-addex>+ Add exercise</button>
+    <button class="btn btn-block mt16" data-addlib>+ Add from library</button>
+    <button class="btn btn-ghost btn-block mt8" data-addex>+ Add custom exercise</button>
     <button class="btn btn-ghost btn-block mt8" data-resetday>Reset this day to default</button>
     <p class="center muted mt16" style="font-size:12px">Changes apply to your next workout, not one in progress.</p>
   `;
   $('[data-back]').addEventListener('click', renderPlanPicker);
+  $('[data-addlib]').addEventListener('click', () => renderLibraryPicker(dayId));
   document.querySelectorAll('[data-up]').forEach((b) => b.addEventListener('click', () => moveEx(dayId, +b.dataset.up, -1)));
   document.querySelectorAll('[data-down]').forEach((b) => b.addEventListener('click', () => moveEx(dayId, +b.dataset.down, +1)));
   document.querySelectorAll('[data-editex]').forEach((b) => b.addEventListener('click', () => renderExerciseForm(dayId, +b.dataset.editex)));
@@ -836,15 +838,18 @@ function delEx(dayId, i) {
   });
 }
 
-function renderExerciseForm(dayId, idx) {
+function renderExerciseForm(dayId, idx, prefill) {
   const editing = idx != null;
   const ex = editing ? userPlan.days[dayId].exercises[idx]
-    : { name: '', sets: 3, reps: '12', tracks: 'weight', notes: '' };
+    : (prefill || { name: '', sets: 3, reps: '12', tracks: 'weight', notes: '' });
+  const cautionBanner = (prefill && prefill.caution)
+    ? `<div class="caution-banner">⚠ ${escapeHtml(prefill.caution)}</div>` : '';
   document.getElementById('app').innerHTML = `
     <header class="app-header">
       <button class="icon-btn" data-back aria-label="Back">‹</button>
       <div class="wk-head" style="flex:1"><div class="wk-title">${editing ? 'Edit exercise' : 'Add exercise'}</div></div>
     </header>
+    ${cautionBanner}
     <div class="form">
       <label class="fld"><span>Name</span>
         <input id="f-name" type="text" value="${escapeHtml(ex.name)}" placeholder="e.g. Seated Cable Row" /></label>
@@ -865,7 +870,7 @@ function renderExerciseForm(dayId, idx) {
       <button class="btn btn-block btn-lg mt16" data-save>${editing ? 'Save changes' : 'Add exercise'}</button>
     </div>
   `;
-  $('[data-back]').addEventListener('click', () => renderDayEditor(dayId));
+  $('[data-back]').addEventListener('click', () => prefill ? renderLibraryPicker(dayId) : renderDayEditor(dayId));
   $('[data-save]').addEventListener('click', () => {
     const name = $('#f-name').value.trim();
     if (!name) { toast('Give it a name'); $('#f-name').focus(); return; }
@@ -882,6 +887,62 @@ function renderExerciseForm(dayId, idx) {
     renderDayEditor(dayId);
     toast(editing ? 'Saved' : 'Added');
   });
+}
+
+/* ================================================================== *
+ * EXERCISE LIBRARY PICKER — search a preloaded list, tap to pre-fill
+ * ================================================================== */
+function libraryListHtml(q) {
+  const query = q.trim().toLowerCase();
+  const match = (e) => !query || e.name.toLowerCase().includes(query)
+    || e.group.toLowerCase().includes(query) || (e.notes && e.notes.toLowerCase().includes(query));
+  let html = '';
+  LIBRARY_GROUPS.forEach((g) => {
+    const items = EXERCISE_LIBRARY.filter((e) => e.group === g && match(e));
+    if (!items.length) return;
+    html += `<div class="lib-group">${escapeHtml(g)}</div>`;
+    items.forEach((e) => {
+      const i = EXERCISE_LIBRARY.indexOf(e);
+      html += `
+        <button class="lib-row" data-pick="${i}">
+          <div class="lib-main">
+            <div class="lib-name">${escapeHtml(e.name)}${e.caution ? ' <span class="lib-warn">⚠</span>' : ''}</div>
+            <div class="lib-meta">${e.sets} × ${escapeHtml(e.reps)} · ${TRACK_LABELS[e.tracks]}${e.caution ? ' · <span class="lib-caution">' + escapeHtml(e.caution) + '</span>' : ''}</div>
+          </div>
+          <span class="chev">›</span>
+        </button>`;
+    });
+  });
+  return html || '<div class="empty">No matches. Use “Add custom exercise” instead.</div>';
+}
+
+function bindLibraryPicks(dayId) {
+  document.querySelectorAll('[data-pick]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const e = EXERCISE_LIBRARY[+b.dataset.pick];
+      // pass a copy so edits in the form don't mutate the library
+      renderExerciseForm(dayId, null, Object.assign({}, e));
+    }));
+}
+
+function renderLibraryPicker(dayId, query = '') {
+  document.getElementById('app').innerHTML = `
+    <header class="app-header">
+      <button class="icon-btn" data-back aria-label="Back">‹</button>
+      <div class="wk-head" style="flex:1"><div class="wk-title">Exercise library</div></div>
+    </header>
+    <input id="lib-search" class="lib-search" type="search" autocomplete="off"
+           placeholder="Search ${EXERCISE_LIBRARY.length} exercises…" value="${escapeHtml(query)}" />
+    <p class="muted" style="font-size:12px;margin:0 2px 12px">Tap one to add it to <b>${escapeHtml(userPlan.days[dayId].name)}</b>. ⚠ marks moves that load the knee or shoulder.</p>
+    <div id="lib-list">${libraryListHtml(query)}</div>
+  `;
+  $('[data-back]').addEventListener('click', () => renderDayEditor(dayId));
+  const search = $('#lib-search');
+  search.addEventListener('input', () => {
+    $('#lib-list').innerHTML = libraryListHtml(search.value);
+    bindLibraryPicks(dayId);
+  });
+  bindLibraryPicks(dayId);
 }
 
 /* ================================================================== *
@@ -1211,7 +1272,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v3 · data stored on this device</p>
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v4 · data stored on this device</p>
   `;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });

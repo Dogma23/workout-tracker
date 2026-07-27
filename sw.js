@@ -1,11 +1,12 @@
 /* Service worker — caches the app shell so it works offline in the gym.
    Bump CACHE when you change any file so clients pull the new version. */
-const CACHE = 'lift-tracker-v3';
+const CACHE = 'lift-tracker-v4';
 const ASSETS = [
   './',
   './index.html',
   './css/styles.css',
   './js/plan.js',
+  './js/exercises.js',
   './js/app.js',
   './manifest.webmanifest',
   './icon.svg',
