@@ -408,6 +408,7 @@ function renderHome() {
     <header class="app-header">
       <h1><span class="logo">${LOGO_SVG}</span> Lift Tracker</h1>
       <div class="header-actions">
+        <button class="icon-btn" data-timer aria-label="Rest timer">⏱</button>
         <button class="icon-btn" data-settings aria-label="Settings">⚙</button>
       </div>
     </header>
@@ -439,6 +440,7 @@ function renderHome() {
 
   // wire up
   $('[data-settings]').addEventListener('click', openSettings);
+  $('[data-timer]').addEventListener('click', startStandaloneTimer);
   document.querySelectorAll('[data-start]').forEach((b) =>
     b.addEventListener('click', () => startWorkout(b.dataset.start)));
   document.querySelectorAll('[data-editday]').forEach((b) =>
@@ -1034,6 +1036,12 @@ const RING_LEN = 2 * Math.PI * 54; // circumference
 
 let timer = { endAt: 0, total: 0, remaining: 0, interval: 0, paused: false, done: false, wakeLock: null };
 
+// Standalone rest timer — use the countdown without tracking a workout.
+function startStandaloneTimer() {
+  unlockAudio();
+  startTimer(settings.rest);
+}
+
 function startTimer(seconds) {
   timer.total = seconds;
   timer.remaining = seconds;
@@ -1148,7 +1156,9 @@ function buildTimerPresets() {
   wrap.querySelectorAll('[data-tpreset]').forEach((b) =>
     b.addEventListener('click', () => {
       const n = num(b.dataset.tpreset);
-      active.rest = n; save(KEY.active, active);
+      // In a workout, change this session's rest; standalone, update the default.
+      if (active) { active.rest = n; save(KEY.active, active); }
+      else { settings.rest = n; save(KEY.settings, settings); }
       startTimer(n);
     }));
 }
@@ -1272,7 +1282,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v4 · data stored on this device</p>
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v5 · data stored on this device</p>
   `;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
