@@ -8,7 +8,7 @@ screen (it's a PWA). No accounts, no server — your data lives on your device.
 ## Features
 
 - **Four workout days built in** — Push, Pull, Full Body + Core, Core + Conditioning — with your exact exercises, sets, reps and injury notes.
-- **Weight + reps logging** per set, with your last-used weight pre-filled next time.
+- **Weight + reps logging** per set, with your last-used weight pre-filled next time. Add or delete sets on the fly, and if a machine is taken you can **swap, add or remove an exercise mid-workout** (just for that session — your saved plan is untouched).
 - **Rest timer** that auto-starts when you tick a set complete. Pick the interval (30 / 45 / 60 / 90 / 120 / 180s or a custom value), ±15s on the fly, and the screen stays awake during rest. You can also run it on its own — tap the ⏱ button on the home screen — for when you just want a timer without logging a workout.
 - **Timer sounds** — a soft start cue, a 3·2·1 countdown blip, and an ascending finish chime (plus vibrate). All generated in-app with the Web Audio API, so nothing to download and it works offline. Toggle in Settings.
 - **Workout time** — a live elapsed clock ticks in the header while you train, and the dashboard shows your cumulative "total time trained".

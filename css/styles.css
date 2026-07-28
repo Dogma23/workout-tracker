@@ -491,10 +491,10 @@ input { font-family: inherit; }
 .sets { padding: 4px 10px 12px; }
 .set-row {
   display: grid;
-  grid-template-columns: 34px 1fr 1fr 52px;
+  grid-template-columns: 22px 1fr 1fr 46px 30px;
   align-items: center;
-  gap: 8px;
-  padding: 6px 6px;
+  gap: 6px;
+  padding: 6px 4px;
   border-radius: 10px;
 }
 .set-row.done { background: var(--accent-dim); }
@@ -541,12 +541,35 @@ input { font-family: inherit; }
 
 .set-head {
   display: grid;
-  grid-template-columns: 34px 1fr 1fr 52px;
-  gap: 8px;
-  padding: 0 6px 2px;
+  grid-template-columns: 22px 1fr 1fr 46px 30px;
+  gap: 6px;
+  padding: 0 4px 2px;
   font-size: 10.5px; color: var(--text-faint);
   text-transform: uppercase; letter-spacing: .05em; text-align: center;
 }
+
+/* delete-set button */
+.set-del {
+  width: 30px; height: 46px;
+  border: none; background: transparent;
+  color: var(--text-faint);
+  font-size: 14px; border-radius: 8px;
+}
+.set-del:active { background: var(--bg-elev-2); color: var(--danger); }
+
+/* per-exercise actions in a workout (swap / remove) */
+.ex-actions { display: flex; gap: 8px; padding: 0 14px 12px; }
+.ex-action {
+  flex: 1;
+  height: 38px;
+  border: 1px solid var(--line);
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+  border-radius: 9px;
+  font-size: 13px; font-weight: 600;
+}
+.ex-action.danger { color: var(--danger); }
+.ex-action.armed { background: var(--warn); color: #2a1602; border-color: var(--warn); }
 .set-head span:first-child { text-align: center; }
 
 .add-set {

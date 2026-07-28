@@ -583,6 +583,7 @@ function renderWorkout() {
           <span class="unit">${isTime ? 'sec' : 'reps'}</span>
         </div>
         <button class="set-check ${set.done ? 'on' : ''}" data-check aria-label="Complete set ${si + 1}">✓</button>
+        <button class="set-del" data-delset aria-label="Delete set ${si + 1}">✕</button>
       </div>`).join('');
 
     return `
@@ -595,12 +596,16 @@ function renderWorkout() {
           ${ex.notes ? `<div class="ex-note">${escapeHtml(ex.notes)}</div>` : ''}
         </div>
         ${progHint}
-        <div class="set-head"><span>#</span><span>${hideWeight ? 'Load' : 'Weight'}</span><span>${repsLabel}</span><span>✓</span></div>
+        <div class="set-head"><span>#</span><span>${hideWeight ? 'Load' : 'Weight'}</span><span>${repsLabel}</span><span>✓</span><span></span></div>
         <div class="sets" data-sets="${ei}">
           ${rows}
           <button class="add-set" data-addset="${ei}">+ Add set</button>
         </div>
         ${prev ? `<div class="last-hint">Last time: <b>${prev.weight || 'BW'} ${prev.weight ? settings.unit : ''}</b>${prev.reps ? ' × ' + escapeHtml(String(prev.reps)) : ''}</div>` : ''}
+        <div class="ex-actions">
+          <button class="ex-action" data-swapex="${ei}">⇄ Swap</button>
+          <button class="ex-action danger" data-removeex="${ei}">✕ Remove</button>
+        </div>
       </div>`;
   }).join('');
 
@@ -621,6 +626,8 @@ function renderWorkout() {
 
     ${warmup}
     ${exBlocks}
+
+    <button class="btn btn-ghost btn-block" data-addexercise>+ Add exercise (machine taken?)</button>
 
     <div class="finish-bar">
       <button class="btn btn-ghost" data-discard style="flex:0 0 auto">Discard</button>
@@ -704,6 +711,25 @@ function wireWorkout() {
   document.querySelectorAll('[data-addset]').forEach((b) =>
     b.addEventListener('click', () => addSet(num(b.dataset.addset))));
 
+  // delete a set
+  document.querySelectorAll('[data-delset]').forEach((b) =>
+    b.addEventListener('click', (e) => {
+      const row = e.target.closest('.set-row');
+      delSet(num(row.dataset.ex), num(row.dataset.set));
+    }));
+
+  // swap / remove an exercise (this session only)
+  document.querySelectorAll('[data-swapex]').forEach((b) =>
+    b.addEventListener('click', () => renderSessionPicker('swap', num(b.dataset.swapex))));
+  document.querySelectorAll('[data-removeex]').forEach((b) =>
+    b.addEventListener('click', (e) => armThen(e.target, '✕ Remove?', () => {
+      active.exercises.splice(num(e.target.dataset.removeex), 1);
+      save(KEY.active, active);
+      renderWorkout();
+      toast('Exercise removed');
+    })));
+  $('[data-addexercise]').addEventListener('click', () => renderSessionPicker('add'));
+
   // apply a progression suggestion — load the new weight into unfinished sets
   document.querySelectorAll('[data-applyprog]').forEach((b) =>
     b.addEventListener('click', () => {
@@ -774,6 +800,58 @@ function addSet(ei) {
   ex.sets.push({ weight: prevSet ? prevSet.weight : '', reps: '', done: false });
   save(KEY.active, active);
   renderWorkout();
+}
+
+function delSet(ei, si) {
+  active.exercises[ei].sets.splice(si, 1);
+  save(KEY.active, active);
+  renderWorkout();
+}
+
+// Build an active-session exercise entry from a plan/library definition.
+function buildActiveEx(def) {
+  return {
+    name: def.name,
+    target: `${def.sets} × ${def.reps}`,
+    reps: def.reps,
+    notes: def.notes || '',
+    tracks: def.tracks || 'weight',
+    sets: Array.from({ length: def.sets || 3 }, () => {
+      const prev = last[def.name];
+      return { weight: prev ? prev.weight : '', reps: '', done: false };
+    }),
+  };
+}
+
+// Library picker used mid-workout to add or swap an exercise for THIS session
+// only (the saved plan is untouched).
+function renderSessionPicker(mode, ei) {
+  const title = mode === 'swap' ? 'Swap exercise' : 'Add exercise';
+  const onPick = (e) => {
+    const built = buildActiveEx(e);
+    if (mode === 'swap') active.exercises[ei] = built;
+    else active.exercises.push(built);
+    save(KEY.active, active);
+    renderWorkout();
+    toast(mode === 'swap' ? 'Swapped' : 'Added');
+  };
+  document.getElementById('app').innerHTML = `
+    <header class="app-header">
+      <button class="icon-btn" data-back aria-label="Back">‹</button>
+      <div class="wk-head" style="flex:1"><div class="wk-title">${title}</div></div>
+    </header>
+    <input id="lib-search" class="lib-search" type="search" autocomplete="off"
+           placeholder="Search ${EXERCISE_LIBRARY.length} exercises…" />
+    <p class="muted" style="font-size:12px;margin:0 2px 12px">${mode === 'swap' ? 'Pick a replacement' : 'Pick something to add'} for today only — your saved plan isn’t changed. ⚠ marks knee/shoulder-loading moves.</p>
+    <div id="lib-list">${libraryListHtml('')}</div>
+  `;
+  $('[data-back]').addEventListener('click', renderWorkout);
+  const search = $('#lib-search');
+  search.addEventListener('input', () => {
+    $('#lib-list').innerHTML = libraryListHtml(search.value);
+    bindLibraryPicks(onPick);
+  });
+  bindLibraryPicks(onPick);
 }
 
 function finishWorkout() {
@@ -986,16 +1064,14 @@ function libraryListHtml(q) {
   return html || '<div class="empty">No matches. Use “Add custom exercise” instead.</div>';
 }
 
-function bindLibraryPicks(dayId) {
+// Bind [data-pick] rows to a callback that receives a *copy* of the library entry.
+function bindLibraryPicks(onPick) {
   document.querySelectorAll('[data-pick]').forEach((b) =>
-    b.addEventListener('click', () => {
-      const e = EXERCISE_LIBRARY[+b.dataset.pick];
-      // pass a copy so edits in the form don't mutate the library
-      renderExerciseForm(dayId, null, Object.assign({}, e));
-    }));
+    b.addEventListener('click', () => onPick(Object.assign({}, EXERCISE_LIBRARY[+b.dataset.pick]))));
 }
 
 function renderLibraryPicker(dayId, query = '') {
+  const onPick = (e) => renderExerciseForm(dayId, null, e);
   document.getElementById('app').innerHTML = `
     <header class="app-header">
       <button class="icon-btn" data-back aria-label="Back">‹</button>
@@ -1010,9 +1086,9 @@ function renderLibraryPicker(dayId, query = '') {
   const search = $('#lib-search');
   search.addEventListener('input', () => {
     $('#lib-list').innerHTML = libraryListHtml(search.value);
-    bindLibraryPicks(dayId);
+    bindLibraryPicks(onPick);
   });
-  bindLibraryPicks(dayId);
+  bindLibraryPicks(onPick);
 }
 
 /* ================================================================== *
@@ -1031,11 +1107,12 @@ function renderSessionEditor(id) {
         <div class="field"><input type="number" inputmode="decimal" step="0.5" value="${set.weight}" data-field="weight" placeholder="0" aria-label="Weight" /><span class="unit">${settings.unit}</span></div>
         <div class="field"><input type="number" inputmode="numeric" value="${set.reps}" data-field="reps" placeholder="0" aria-label="Reps" /><span class="unit">reps</span></div>
         <button class="set-check ${set.done ? 'on' : ''}" data-check aria-label="Toggle counted">✓</button>
+        <button class="set-del" data-delset aria-label="Delete set ${si + 1}">✕</button>
       </div>`).join('');
     return `
       <div class="exercise">
         <div class="ex-head"><div class="ex-title-row"><span class="ex-name">${escapeHtml(ex.name)}</span></div></div>
-        <div class="set-head"><span>#</span><span>Weight</span><span>Reps</span><span>✓</span></div>
+        <div class="set-head"><span>#</span><span>Weight</span><span>Reps</span><span>✓</span><span></span></div>
         <div class="sets">${rows}</div>
       </div>`;
   }).join('');
@@ -1071,6 +1148,12 @@ function renderSessionEditor(id) {
     e.target.classList.toggle('on', s.done);
     row.classList.toggle('done', s.done);
     persist();
+  }));
+  document.querySelectorAll('[data-delset]').forEach((b) => b.addEventListener('click', (e) => {
+    const row = e.target.closest('.set-row');
+    h.exercises[+row.dataset.ex].sets.splice(+row.dataset.set, 1);
+    persist();
+    renderSessionEditor(id);
   }));
   $('[data-delsession]').addEventListener('click', (e) => armThen(e.target, 'Confirm delete', () => {
     history.splice(idx, 1);
@@ -1259,39 +1342,35 @@ function tone(freq, start, dur, peak = 0.3, type = 'sine') {
   g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
   o.start(start); o.stop(start + dur + 0.03);
 }
-// Soft cue when a rest begins.
-function soundStart() {
+// Run an audio routine, resuming the context first. Playing music in another
+// app can leave the page's AudioContext suspended/interrupted, so we always
+// resume and only schedule the tones once it's actually running.
+function withAudio(cb) {
   if (!settings.sound) return;
-  unlockAudio(); if (!audioCtx) return;
-  tone(523, audioCtx.currentTime, 0.14, 0.16);
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch { return; }
+  }
+  const run = () => { try { cb(audioCtx.currentTime); } catch { /* ignore */ } };
+  if (audioCtx.state === 'suspended') audioCtx.resume().then(run).catch(run);
+  else run();
 }
+// Soft cue when a rest begins.
+function soundStart() { withAudio((t) => tone(523, t, 0.14, 0.18)); }
 // Short blip for the final 3-2-1 countdown seconds.
-function soundTick() {
-  if (!settings.sound || !audioCtx) return;
-  tone(760, audioCtx.currentTime, 0.07, 0.22, 'square');
-}
-// Ascending 3-note chime when the rest ends.
+function soundTick() { withAudio((t) => tone(760, t, 0.07, 0.26, 'square')); }
+// Ascending 3-note chime when the rest ends (a bit louder to cut through music).
 function soundFinish() {
-  if (!settings.sound || !audioCtx) return;
-  const t = audioCtx.currentTime;
-  tone(659, t, 0.16, 0.32);
-  tone(880, t + 0.18, 0.16, 0.34);
-  tone(1175, t + 0.36, 0.34, 0.42);
+  withAudio((t) => {
+    tone(659, t, 0.18, 0.5);
+    tone(880, t + 0.19, 0.18, 0.55);
+    tone(1175, t + 0.38, 0.42, 0.6);
+  });
 }
 // Two-note preview used when toggling sound on in settings.
-function soundPreview() {
-  unlockAudio(); if (!audioCtx) return;
-  const t = audioCtx.currentTime;
-  tone(660, t, 0.12, 0.3);
-  tone(990, t + 0.15, 0.16, 0.32);
-}
+function soundPreview() { withAudio((t) => { tone(660, t, 0.12, 0.34); tone(990, t + 0.15, 0.16, 0.36); }); }
 // Gentle descending two-note cue for hydration reminders (distinct from rest).
-function soundHydration() {
-  if (!settings.sound || !audioCtx) return;
-  const t = audioCtx.currentTime;
-  tone(988, t, 0.16, 0.26);
-  tone(659, t + 0.18, 0.24, 0.26);
-}
+function soundHydration() { withAudio((t) => { tone(988, t, 0.16, 0.34); tone(659, t + 0.18, 0.24, 0.34); }); }
 function vibrate(pattern) {
   if (settings.vibrate && navigator.vibrate) { try { navigator.vibrate(pattern); } catch {} }
 }
@@ -1369,7 +1448,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v6 · data stored on this device</p>
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v7 · data stored on this device</p>
   `;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
@@ -1445,9 +1524,12 @@ window.addEventListener('pointerdown', () => unlockAudio(), { once: true });
 // When the user returns to the app during a rest, refresh the count instantly
 // (in case throttling let it drift) and re-acquire the wake lock.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && !timerSheet.hidden && !timer.paused && !timer.done) {
-    requestWakeLock();
-    tick();
+  if (document.visibilityState === 'visible') {
+    unlockAudio();   // recover audio if a music app suspended our context
+    if (!timerSheet.hidden && !timer.paused && !timer.done) {
+      requestWakeLock();
+      tick();
+    }
   }
 });
 
