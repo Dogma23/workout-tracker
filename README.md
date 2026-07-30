@@ -9,7 +9,9 @@ screen (it's a PWA). No accounts, no server — your data lives on your device.
 
 - **Four workout days built in** — Push, Pull, Full Body + Core, Core + Conditioning — with your exact exercises, sets, reps and injury notes.
 - **Weight + reps logging** per set, with your last-used weight pre-filled next time. Add or delete sets on the fly, and if a machine is taken you can **swap, add or remove an exercise mid-workout** (just for that session — your saved plan is untouched).
-- **Rest timer** that auto-starts when you tick a set complete. Pick the interval (30 / 45 / 60 / 90 / 120 / 180s or a custom value), ±15s on the fly, and the screen stays awake during rest. You can also run it on its own — tap the ⏱ button on the home screen — for when you just want a timer without logging a workout.
+- **Rest timer** that auto-starts when you tick a set complete. Pick the interval (30 / 45 / 60 / 90 / 120 / 180s or a custom value), ±15s on the fly. The screen is kept awake for the whole workout so the phone won't auto-lock mid-session and miss the beep. You can also run the timer on its own — tap the ⏱ button on the home screen — for when you just want a timer without logging a workout.
+
+> **Note on sound while the phone is locked:** if you manually lock an iPhone (or leave the app), the browser suspends the page — timers and sound can't run in the background, and there's no web workaround for that. Keeping the app on-screen (the workout keeps the screen awake for you) means the beep fires on time, even with music playing in the background.
 - **Timer sounds** — a soft start cue, a 3·2·1 countdown blip, and an ascending finish chime (plus vibrate). All generated in-app with the Web Audio API, so nothing to download and it works offline. Toggle in Settings.
 - **Workout time** — a live elapsed clock ticks in the header while you train, and the dashboard shows your cumulative "total time trained".
 - **Hydration reminders** — during a workout it nudges you to drink water at your chosen interval (default every 15 min) with a gentle sound, vibrate and on-screen prompt. Configurable / switch-off in Settings.

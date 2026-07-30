@@ -479,6 +479,8 @@ function renderHome() {
     $('#chart-ex-body').innerHTML = svgLineChart(exerciseSeries(chartEx));
     $('#chart-ex-label').textContent = metricLabel(chartEx);
   });
+
+  syncWake();   // not on the workout screen → release any screen lock
 }
 
 /* ================================================================== *
@@ -637,6 +639,7 @@ function renderWorkout() {
 
   wireWorkout();
   startWorkoutClock();
+  syncWake();   // keep the screen awake for the whole session
 }
 
 /* ------------------------------------------------------------------ *
@@ -1206,7 +1209,7 @@ function startTimer(seconds) {
   const pb = $('#timer-pause');
   pb.textContent = 'Pause';
   pb.classList.remove('paused');
-  requestWakeLock();
+  acquireWake();
   soundStart();
   runInterval();
   tick();
@@ -1250,7 +1253,7 @@ function onTimerDone() {
   ringProgress.style.strokeDashoffset = RING_LEN;
   soundFinish();
   vibrate([200, 100, 200]);
-  releaseWakeLock();
+  syncWake();   // keep the screen on if still mid-workout; release if standalone
   // auto-close shortly after
   clearTimeout(timer.closeTO);
   timer.closeTO = setTimeout(() => { if (!timer.paused) closeTimer(); }, 1400);
@@ -1295,7 +1298,7 @@ function closeTimer() {
   timerSheet.hidden = true;
   clearInterval(timer.interval);
   clearTimeout(timer.closeTO);
-  releaseWakeLock();
+  syncWake();   // keep lock if still on the workout screen, else release
 }
 function stopTimer() { timer.paused = true; closeTimer(); }
 
@@ -1375,14 +1378,27 @@ function vibrate(pattern) {
   if (settings.vibrate && navigator.vibrate) { try { navigator.vibrate(pattern); } catch {} }
 }
 
-/* ---- Screen wake lock (best effort — keeps screen on during rest) ---- */
-async function requestWakeLock() {
+/* ---- Screen wake lock — keep the screen ON for the whole workout (and any
+   open timer) so the phone doesn't auto-lock mid-session and silence the timer.
+   Note: iOS can't run timers or play sound once the phone is *manually* locked
+   — that's a browser limitation no web app can work around. ---- */
+let wakeLock = null;
+async function acquireWake() {
   try {
-    if ('wakeLock' in navigator) timer.wakeLock = await navigator.wakeLock.request('screen');
+    if ('wakeLock' in navigator && document.visibilityState === 'visible' && !wakeLock) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    }
   } catch { /* not supported / denied */ }
 }
-function releaseWakeLock() {
-  try { if (timer.wakeLock) { timer.wakeLock.release(); timer.wakeLock = null; } } catch {}
+function releaseWake() {
+  try { if (wakeLock) { wakeLock.release(); wakeLock = null; } } catch {}
+}
+// Hold the lock while on the workout screen or with a timer open; else drop it.
+function syncWake() {
+  const onWorkout = !!document.getElementById('wk-elapsed');
+  const timerOpen = timerSheet && !timerSheet.hidden;
+  if (onWorkout || timerOpen) acquireWake(); else releaseWake();
 }
 
 /* ================================================================== *
@@ -1448,7 +1464,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v7 · data stored on this device</p>
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v8 · data stored on this device</p>
   `;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
@@ -1526,10 +1542,8 @@ window.addEventListener('pointerdown', () => unlockAudio(), { once: true });
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     unlockAudio();   // recover audio if a music app suspended our context
-    if (!timerSheet.hidden && !timer.paused && !timer.done) {
-      requestWakeLock();
-      tick();
-    }
+    syncWake();      // re-acquire the screen lock (it's dropped when hidden)
+    if (!timerSheet.hidden && !timer.paused && !timer.done) tick();
   }
 });
 
