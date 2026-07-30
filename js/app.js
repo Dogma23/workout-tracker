@@ -141,6 +141,18 @@ function stats() {
   return { total, thisWeek, totalVol, streak, totalTime };
 }
 
+// The day to suggest on the dashboard hero = least-recently trained (history
+// is newest-first, so a day never done sorts oldest and wins).
+function suggestedDayId() {
+  let best = userPlan.order[0], bestTime = Infinity;
+  userPlan.order.forEach((id) => {
+    const lastSession = history.find((h) => h.dayId === id);
+    const t = lastSession ? lastSession.date : 0;
+    if (t < bestTime) { bestTime = t; best = id; }
+  });
+  return best;
+}
+
 // Best (heaviest single logged set) per exercise across all history.
 function personalBests() {
   const best = {};
@@ -355,6 +367,14 @@ function renderHome() {
       <button class="btn" data-resume>Resume</button>
     </div>` : '';
 
+  const sug = userPlan.days[suggestedDayId()];
+  const heroHtml = active ? '' : `
+    <div class="hero">
+      <div class="hero-date">${new Date().toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}</div>
+      <h2 class="hero-title"><span>${escapeHtml(sug.name)}</span> day is ready</h2>
+      <button class="btn btn-block btn-lg" data-start="${sug.id}">Start today's workout</button>
+    </div>`;
+
   const dayCards = userPlan.order.map((id) => {
     const d = userPlan.days[id];
     return `
@@ -434,6 +454,7 @@ function renderHome() {
     </header>
 
     ${resumeHtml}
+    ${heroHtml}
 
     <div class="stat-grid">
       <div class="stat accent"><div class="num">${s.total}</div><div class="lbl">Workouts</div></div>
@@ -1464,7 +1485,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v8 · data stored on this device</p>
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v9 · data stored on this device</p>
   `;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
@@ -1523,11 +1544,11 @@ function exportData() {
  * Boot
  * ================================================================== */
 const LOGO_SVG = `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect x="1" y="9" width="3" height="6" rx="1" fill="#2dd4a7"/>
-  <rect x="20" y="9" width="3" height="6" rx="1" fill="#2dd4a7"/>
-  <rect x="4" y="7" width="3" height="10" rx="1" fill="#2dd4a7"/>
-  <rect x="17" y="7" width="3" height="10" rx="1" fill="#2dd4a7"/>
-  <rect x="7" y="11" width="10" height="2" rx="1" fill="#2dd4a7"/>
+  <rect x="1" y="9" width="3" height="6" rx="1" fill="#10a06a"/>
+  <rect x="20" y="9" width="3" height="6" rx="1" fill="#10a06a"/>
+  <rect x="4" y="7" width="3" height="10" rx="1" fill="#10a06a"/>
+  <rect x="17" y="7" width="3" height="10" rx="1" fill="#10a06a"/>
+  <rect x="7" y="11" width="10" height="2" rx="1" fill="#10a06a"/>
 </svg>`;
 
 // Restore mid-workout on reload if the user was in one.

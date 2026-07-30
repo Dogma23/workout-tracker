@@ -57,10 +57,20 @@ All exercises live in [`js/plan.js`](js/plan.js) — edit the names, sets, reps 
 notes there and the app updates. Bump the `CACHE` version in `sw.js` after any
 change so the offline copy refreshes.
 
-## Roadmap ideas
+## Roadmap
 
-- Per-set RPE / "felt easy?" tagging to sharpen the progression suggestions
-- Add-exercise on the fly during a workout (one-off, without editing the plan)
+Next up (decided):
+- **Light & clean redesign** — port the locked "direction B" look (soft off-white
+  ground, white cards, one refined emerald accent) into the app, screen by screen.
+- **Multi-profile + smart injury-aware cautions (MVP)** — per-profile data with a
+  switcher; a one-time setup (goal, experience, days/week, equipment, areas to
+  protect); exercise "loads" tags so a ⚠ shows only for the areas that profile
+  flagged (a healthy profile sees none). Existing data migrates into a "Me" profile.
+
+Ideas (not scheduled):
+- Per-set RPE / "felt easy? / had pain?" tagging to sharpen and de-risk the progression suggestions
+- Pick-a-plan starter templates (Full Body, Push/Pull/Legs, Upper/Lower, bodyweight)
+- Auto-substitute risky exercises for safe alternatives based on the chosen injuries
 - Cloud sync / backup
 
 ---
