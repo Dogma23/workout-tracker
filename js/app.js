@@ -10,37 +10,77 @@
 /* ------------------------------------------------------------------ *
  * Storage helpers
  * ------------------------------------------------------------------ */
-const KEY = {
-  settings: 'wt_settings_v1',
-  history: 'wt_history_v1',
-  active: 'wt_active_v1',
-  last: 'wt_last_v1',            // last weight/reps used per exercise, for prefill
-  plan: 'wt_plan_v1',           // user-editable copy of the program (days + exercises)
-  warmup: 'wt_warmup_v1',       // warm-up rotation pointer { weekKey, count }
-};
-
 const load = (k, fallback) => {
   try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fallback; }
   catch { return fallback; }
 };
 const save = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 
-/* ------------------------------------------------------------------ *
- * App state
- * ------------------------------------------------------------------ */
 const DEFAULT_SETTINGS = { rest: 90, sound: true, vibrate: true, unit: 'kg', hydration: true, hydrationMin: 15 };
 
-let settings = Object.assign({}, DEFAULT_SETTINGS, load(KEY.settings, {}));
-let history = load(KEY.history, []);
-let last = load(KEY.last, {});
-let active = load(KEY.active, null);   // in-progress session or null
-let chartEx = null;                    // exercise selected in the progress line chart
+/* ------------------------------------------------------------------ *
+ * Profiles — each person's data lives under keys namespaced by profile id
+ * (wt_<id>_history, …). A registry (wt_profiles) tracks the list + current.
+ * ------------------------------------------------------------------ */
+const PROFILES_KEY = 'wt_profiles';
+const newProfileId = () => 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+const keysFor = (pid) => ({
+  settings: `wt_${pid}_settings`, history: `wt_${pid}_history`, active: `wt_${pid}_active`,
+  last: `wt_${pid}_last`, plan: `wt_${pid}_plan`, warmup: `wt_${pid}_warmup`,
+});
 
-// User-editable program, seeded from the built-in default (plan.js) on first run.
-// Shape: { order: [dayId...], days: { dayId: {id,name,day,subtitle,exercises:[...]} } }
+// Load the registry, or create it — migrating any legacy (un-namespaced v1) data
+// into a first profile named "Me" so nothing is lost on upgrade.
+function loadProfiles() {
+  const reg = load(PROFILES_KEY, null);
+  if (reg && Array.isArray(reg.list) && reg.list.length) return reg;
+
+  const id = newProfileId();
+  const legacy = { settings: 'wt_settings_v1', history: 'wt_history_v1', active: 'wt_active_v1',
+    last: 'wt_last_v1', plan: 'wt_plan_v1', warmup: 'wt_warmup_v1' };
+  const k = keysFor(id);
+  let migrated = false;
+  Object.keys(legacy).forEach((base) => {
+    const raw = localStorage.getItem(legacy[base]);
+    if (raw != null) { localStorage.setItem(k[base], raw); localStorage.removeItem(legacy[base]); migrated = true; }
+  });
+  const fresh = {
+    currentId: id,
+    list: [{
+      id, name: 'Me', goal: 'fat loss', experience: 'intermediate', days: 4, equipment: 'full gym',
+      // Keep the existing user's known knee/shoulder cautions working after upgrade.
+      protect: migrated ? ['knees', 'shoulders'] : [],
+      onboarded: migrated, createdAt: Date.now(),
+    }],
+  };
+  save(PROFILES_KEY, fresh);
+  return fresh;
+}
+
+let profiles = loadProfiles();
+const saveProfiles = () => save(PROFILES_KEY, profiles);
+const currentProfile = () => profiles.list.find((p) => p.id === profiles.currentId) || profiles.list[0];
+
+/* ------------------------------------------------------------------ *
+ * Per-profile app state (repointed by loadProfileState on switch)
+ * ------------------------------------------------------------------ */
 const seedPlan = () => ({ order: PLAN_ORDER.slice(), days: JSON.parse(JSON.stringify(PLAN)) });
-let userPlan = load(KEY.plan, null) || seedPlan();
+
+let KEY, settings, history, last, active, userPlan;
+let chartEx = null;                    // exercise selected in the progress line chart
 const savePlan = () => save(KEY.plan, userPlan);
+
+function loadProfileState() {
+  KEY = keysFor(profiles.currentId);
+  settings = Object.assign({}, DEFAULT_SETTINGS, load(KEY.settings, {}));
+  history = load(KEY.history, []);
+  last = load(KEY.last, {});
+  active = load(KEY.active, null);
+  userPlan = load(KEY.plan, null);
+  if (!userPlan) { userPlan = seedPlan(); save(KEY.plan, userPlan); }
+  chartEx = null;
+}
+loadProfileState();
 
 const REST_PRESETS = [30, 45, 60, 90, 120, 180];
 const TRACK_LABELS = { weight: 'Weighted', bodyweight: 'Bodyweight', time: 'Time / hold' };
@@ -191,6 +231,29 @@ function allExNames() {
     if (!names.includes(e.name)) names.push(e.name);
   }));
   return names;
+}
+
+/* ------------------------------------------------------------------ *
+ * Smart injury cautions — flag an exercise only when a joint it loads is
+ * one the CURRENT profile chose to protect. Healthy profile => no flags.
+ * ------------------------------------------------------------------ */
+function loadsForName(name) {
+  const e = EXERCISE_LIBRARY.find((x) => x.name === name);
+  return (e && e.loads) || [];
+}
+function joinAreas(a) {
+  if (a.length <= 1) return a[0] || '';
+  if (a.length === 2) return `${a[0]} and ${a[1]}`;
+  return `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}`;
+}
+// Returns a caution string for `def`, or null. `def` may carry `loads`
+// (library entry) or just a name (plan exercise — looked up in the library).
+function cautionFor(def) {
+  const protect = currentProfile().protect || [];
+  if (!def || !protect.length) return null;
+  const loads = def.loads || loadsForName(def.name);
+  const hit = loads.filter((a) => protect.includes(a));
+  return hit.length ? `Loads your ${joinAreas(hit)} — ease in / get sign-off` : null;
 }
 
 // Top of a target range, e.g. "10–12" -> 12, "20 sec each side" -> 20.
@@ -448,6 +511,7 @@ function renderHome() {
     <header class="app-header">
       <h1><span class="logo">${LOGO_SVG}</span> Lift Tracker</h1>
       <div class="header-actions">
+        <button class="icon-btn profile-chip" data-profiles aria-label="Profiles">${escapeHtml((currentProfile().name[0] || '?').toUpperCase())}</button>
         <button class="icon-btn" data-timer aria-label="Rest timer">⏱</button>
         <button class="icon-btn" data-settings aria-label="Settings">⚙</button>
       </div>
@@ -483,6 +547,7 @@ function renderHome() {
   // wire up
   $('[data-settings]').addEventListener('click', openSettings);
   $('[data-timer]').addEventListener('click', startStandaloneTimer);
+  $('[data-profiles]').addEventListener('click', renderProfiles);
   document.querySelectorAll('[data-start]').forEach((b) =>
     b.addEventListener('click', () => startWorkout(b.dataset.start)));
   document.querySelectorAll('[data-editday]').forEach((b) =>
@@ -866,7 +931,7 @@ function renderSessionPicker(mode, ei) {
     </header>
     <input id="lib-search" class="lib-search" type="search" autocomplete="off"
            placeholder="Search ${EXERCISE_LIBRARY.length} exercises…" />
-    <p class="muted" style="font-size:12px;margin:0 2px 12px">${mode === 'swap' ? 'Pick a replacement' : 'Pick something to add'} for today only — your saved plan isn’t changed. ⚠ marks knee/shoulder-loading moves.</p>
+    <p class="muted" style="font-size:12px;margin:0 2px 12px">${mode === 'swap' ? 'Pick a replacement' : 'Pick something to add'} for today only — your saved plan isn’t changed.${currentProfile().protect.length ? ' ⚠ marks moves that load a joint you’re protecting.' : ''}</p>
     <div id="lib-list">${libraryListHtml('')}</div>
   `;
   $('[data-back]').addEventListener('click', renderWorkout);
@@ -955,7 +1020,7 @@ function renderDayEditor(dayId) {
   const rows = d.exercises.map((ex, i) => `
     <div class="edit-row">
       <div class="edit-main">
-        <div class="edit-name">${escapeHtml(ex.name)}</div>
+        <div class="edit-name">${escapeHtml(ex.name)}${cautionFor(ex) ? ' <span class="lib-warn">⚠</span>' : ''}</div>
         <div class="edit-meta">${ex.sets} × ${escapeHtml(ex.reps)} · ${TRACK_LABELS[ex.tracks] || ex.tracks}</div>
       </div>
       <div class="edit-actions">
@@ -1014,8 +1079,9 @@ function renderExerciseForm(dayId, idx, prefill) {
   const editing = idx != null;
   const ex = editing ? userPlan.days[dayId].exercises[idx]
     : (prefill || { name: '', sets: 3, reps: '12', tracks: 'weight', notes: '' });
-  const cautionBanner = (prefill && prefill.caution)
-    ? `<div class="caution-banner">⚠ ${escapeHtml(prefill.caution)}</div>` : '';
+  const cautionText = cautionFor(prefill || ex);
+  const cautionBanner = cautionText
+    ? `<div class="caution-banner">⚠ ${escapeHtml(cautionText)}</div>` : '';
   document.getElementById('app').innerHTML = `
     <header class="app-header">
       <button class="icon-btn" data-back aria-label="Back">‹</button>
@@ -1075,11 +1141,12 @@ function libraryListHtml(q) {
     html += `<div class="lib-group">${escapeHtml(g)}</div>`;
     items.forEach((e) => {
       const i = EXERCISE_LIBRARY.indexOf(e);
+      const c = cautionFor(e);
       html += `
         <button class="lib-row" data-pick="${i}">
           <div class="lib-main">
-            <div class="lib-name">${escapeHtml(e.name)}${e.caution ? ' <span class="lib-warn">⚠</span>' : ''}</div>
-            <div class="lib-meta">${e.sets} × ${escapeHtml(e.reps)} · ${TRACK_LABELS[e.tracks]}${e.caution ? ' · <span class="lib-caution">' + escapeHtml(e.caution) + '</span>' : ''}</div>
+            <div class="lib-name">${escapeHtml(e.name)}${c ? ' <span class="lib-warn">⚠</span>' : ''}</div>
+            <div class="lib-meta">${e.sets} × ${escapeHtml(e.reps)} · ${TRACK_LABELS[e.tracks]}${c ? ' · <span class="lib-caution">' + escapeHtml(c) + '</span>' : ''}</div>
           </div>
           <span class="chev">›</span>
         </button>`;
@@ -1103,7 +1170,7 @@ function renderLibraryPicker(dayId, query = '') {
     </header>
     <input id="lib-search" class="lib-search" type="search" autocomplete="off"
            placeholder="Search ${EXERCISE_LIBRARY.length} exercises…" value="${escapeHtml(query)}" />
-    <p class="muted" style="font-size:12px;margin:0 2px 12px">Tap one to add it to <b>${escapeHtml(userPlan.days[dayId].name)}</b>. ⚠ marks moves that load the knee or shoulder.</p>
+    <p class="muted" style="font-size:12px;margin:0 2px 12px">Tap one to add it to <b>${escapeHtml(userPlan.days[dayId].name)}</b>.${currentProfile().protect.length ? ' ⚠ marks moves that load a joint you’re protecting.' : ''}</p>
     <div id="lib-list">${libraryListHtml(query)}</div>
   `;
   $('[data-back]').addEventListener('click', () => renderDayEditor(dayId));
@@ -1423,6 +1490,134 @@ function syncWake() {
 }
 
 /* ================================================================== *
+ * PROFILES — multiple people / setups on one device
+ * ================================================================== */
+function renderProfiles() {
+  const rows = profiles.list.map((p) => {
+    const cur = p.id === profiles.currentId;
+    const areas = (p.protect && p.protect.length)
+      ? p.protect.map((a) => (BODY_AREAS.find((x) => x.key === a) || {}).label || a).join(', ')
+      : 'No injuries flagged';
+    return `
+      <div class="prof-row ${cur ? 'current' : ''}">
+        <button class="prof-hit" data-switch="${p.id}">
+          <span class="prof-av">${escapeHtml((p.name[0] || '?').toUpperCase())}</span>
+          <span class="prof-main">
+            <span class="prof-name">${escapeHtml(p.name)}${cur ? ' <span class="prof-badge">current</span>' : ''}</span>
+            <span class="prof-sub">${escapeHtml(areas)}</span>
+          </span>
+        </button>
+        <button class="mini-btn" data-editprof="${p.id}" aria-label="Edit ${escapeHtml(p.name)}">✎</button>
+        ${profiles.list.length > 1 ? `<button class="mini-btn danger" data-delprof="${p.id}" aria-label="Delete ${escapeHtml(p.name)}">✕</button>` : ''}
+      </div>`;
+  }).join('');
+
+  document.getElementById('app').innerHTML = `
+    <header class="app-header">
+      <button class="icon-btn" data-back aria-label="Back">‹</button>
+      <div class="wk-head" style="flex:1"><div class="wk-title">Profiles</div></div>
+    </header>
+    <p class="muted" style="font-size:13px;margin:0 2px 14px">Each profile keeps its own workouts, plan and injury settings. Tap one to switch.</p>
+    ${rows}
+    <button class="btn btn-block mt16" data-addprof>+ Add profile</button>
+  `;
+  $('[data-back]').addEventListener('click', () => (active ? renderWorkout() : renderHome()));
+  document.querySelectorAll('[data-switch]').forEach((b) => b.addEventListener('click', () => switchProfile(b.dataset.switch)));
+  document.querySelectorAll('[data-editprof]').forEach((b) => b.addEventListener('click', () => renderOnboarding(b.dataset.editprof, false)));
+  document.querySelectorAll('[data-delprof]').forEach((b) => b.addEventListener('click', (e) => armThen(e.target, '✕?', () => deleteProfile(b.dataset.delprof))));
+  $('[data-addprof]').addEventListener('click', addProfile);
+}
+
+function switchProfile(id) {
+  if (id === profiles.currentId) { renderHome(); return; }
+  profiles.currentId = id;
+  saveProfiles();
+  stopTimer();
+  loadProfileState();
+  const p = currentProfile();
+  toast(`Switched to ${p.name}`);
+  if (!p.onboarded) renderOnboarding(p.id, false);
+  else if (active) renderWorkout();
+  else renderHome();
+}
+
+function addProfile() {
+  const id = newProfileId();
+  profiles.list.push({ id, name: 'New profile', goal: 'general fitness', experience: 'new',
+    days: 3, equipment: 'full gym', protect: [], onboarded: false, createdAt: Date.now() });
+  profiles.currentId = id;
+  saveProfiles();
+  stopTimer();
+  loadProfileState();   // seeds the default plan for the new profile
+  renderOnboarding(id, true);
+}
+
+function deleteProfile(id) {
+  if (profiles.list.length <= 1) { toast("Can't delete your only profile"); return; }
+  Object.values(keysFor(id)).forEach((key) => localStorage.removeItem(key));
+  profiles.list = profiles.list.filter((p) => p.id !== id);
+  if (profiles.currentId === id) { profiles.currentId = profiles.list[0].id; loadProfileState(); }
+  saveProfiles();
+  toast('Profile deleted');
+  renderProfiles();
+}
+
+function renderOnboarding(id, isNew) {
+  const p = profiles.list.find((x) => x.id === id) || currentProfile();
+  const opt = (v, val) => (v === val ? 'selected' : '');
+  const chosen = new Set(p.protect || []);
+  const areaChips = BODY_AREAS.map((a) =>
+    `<button type="button" class="area-chip ${chosen.has(a.key) ? 'on' : ''}" data-area="${a.key}">${a.label}</button>`).join('');
+
+  document.getElementById('app').innerHTML = `
+    <header class="app-header">
+      <button class="icon-btn" data-back aria-label="Back">‹</button>
+      <div class="wk-head" style="flex:1"><div class="wk-title">${isNew ? 'New profile' : 'Edit profile'}</div></div>
+    </header>
+    <div class="form">
+      <label class="fld"><span>Name</span>
+        <input id="o-name" type="text" value="${escapeHtml(p.name)}" placeholder="Your name" /></label>
+      <label class="fld"><span>Main goal</span>
+        <select id="o-goal">${['fat loss', 'build muscle', 'get stronger', 'general fitness'].map((g) => `<option ${opt(p.goal, g)}>${g}</option>`).join('')}</select></label>
+      <div class="fld-row">
+        <label class="fld"><span>Experience</span>
+          <select id="o-exp">${['new', 'intermediate', 'experienced'].map((g) => `<option ${opt(p.experience, g)}>${g}</option>`).join('')}</select></label>
+        <label class="fld"><span>Days / week</span>
+          <input id="o-days" type="number" inputmode="numeric" min="1" max="7" value="${p.days || 3}" /></label>
+      </div>
+      <label class="fld"><span>Equipment</span>
+        <select id="o-equip">${['full gym', 'dumbbells only', 'home rack', 'bodyweight only'].map((g) => `<option ${opt(p.equipment, g)}>${g}</option>`).join('')}</select></label>
+      <div class="fld"><span>Areas to protect</span>
+        <div class="area-chips">${areaChips}</div>
+        <div class="muted" style="font-size:12px;margin-top:4px">Tap any joints that give you trouble — the app flags exercises that load them. Leave all off if you have none.</div>
+      </div>
+      <button class="btn btn-block btn-lg mt16" data-save>${isNew ? 'Create profile' : 'Save'}</button>
+    </div>
+  `;
+  document.querySelectorAll('[data-area]').forEach((b) => b.addEventListener('click', () => {
+    const key = b.dataset.area;
+    if (chosen.has(key)) { chosen.delete(key); b.classList.remove('on'); }
+    else { chosen.add(key); b.classList.add('on'); }
+  }));
+  $('[data-back]').addEventListener('click', () => {
+    if (isNew && !p.onboarded) deleteProfile(p.id);   // discard a cancelled new profile
+    else renderProfiles();
+  });
+  $('[data-save]').addEventListener('click', () => {
+    p.name = $('#o-name').value.trim() || 'Me';
+    p.goal = $('#o-goal').value;
+    p.experience = $('#o-exp').value;
+    p.days = Math.max(1, Math.min(7, Math.round(num($('#o-days').value)) || 3));
+    p.equipment = $('#o-equip').value;
+    p.protect = [...chosen];
+    p.onboarded = true;
+    saveProfiles();
+    toast(isNew ? 'Profile created' : 'Saved');
+    renderHome();
+  });
+}
+
+/* ================================================================== *
  * SETTINGS
  * ================================================================== */
 function openSettings() {
@@ -1433,6 +1628,14 @@ function openSettings() {
       <button class="icon-btn" data-back aria-label="Back">‹</button>
       <div class="wk-head" style="flex:1"><div class="wk-title">Settings</div></div>
     </header>
+
+    <div class="section-title">Profile</div>
+    <div class="stat" style="padding:4px 16px">
+      <div class="settings-row">
+        <div><div class="sr-label">${escapeHtml(currentProfile().name)}</div><div class="sr-sub">Switch, add, edit or remove profiles</div></div>
+        <button class="btn btn-ghost" id="set-profiles">Manage</button>
+      </div>
+    </div>
 
     <div class="section-title">Rest timer</div>
     <div class="stat" style="padding:4px 16px">
@@ -1480,15 +1683,15 @@ function openSettings() {
         <button class="btn btn-ghost" id="set-export">Export</button>
       </div>
       <div class="settings-row">
-        <div><div class="sr-label">Reset everything</div><div class="sr-sub">Clears all logged workouts</div></div>
+        <div><div class="sr-label">Reset this profile</div><div class="sr-sub">Clears ${escapeHtml(currentProfile().name)}'s workouts &amp; plan</div></div>
         <button class="btn btn-danger" id="set-reset">Reset</button>
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v9 · data stored on this device</p>
-  `;
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v10 · data stored on this device</p>`;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
+  $('#set-profiles').addEventListener('click', renderProfiles);
 
   $('#set-rest').addEventListener('change', (e) => {
     settings.rest = Math.max(5, Math.min(900, Math.round(num(e.target.value)) || 90));
@@ -1517,19 +1720,16 @@ function openSettings() {
       settings.unit = b.dataset.unit; save(KEY.settings, settings); openSettings();
     }));
   $('#set-export').addEventListener('click', exportData);
-  $('#set-reset').addEventListener('click', () => {
-    if (!confirm('Delete ALL workout history and settings? This cannot be undone.')) return;
-    if (!confirm('Really reset everything?')) return;
+  $('#set-reset').addEventListener('click', (e) => armThen(e.target, 'Tap again to erase', () => {
     [KEY.history, KEY.active, KEY.last, KEY.settings, KEY.plan, KEY.warmup].forEach((k) => localStorage.removeItem(k));
-    settings = Object.assign({}, DEFAULT_SETTINGS);
-    history = []; last = {}; active = null; userPlan = seedPlan();
-    toast('All data cleared');
+    loadProfileState();
+    toast('Profile reset');
     renderHome();
-  });
+  }));
 }
 
 function exportData() {
-  const blob = new Blob([JSON.stringify({ history, last, settings, plan: userPlan, exportedAt: new Date().toISOString() }, null, 2)],
+  const blob = new Blob([JSON.stringify({ profile: currentProfile(), history, last, settings, plan: userPlan, exportedAt: new Date().toISOString() }, null, 2)],
     { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -1551,8 +1751,10 @@ const LOGO_SVG = `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" xm
   <rect x="7" y="11" width="10" height="2" rx="1" fill="#10a06a"/>
 </svg>`;
 
-// Restore mid-workout on reload if the user was in one.
-if (active) renderWorkout(); else renderHome();
+// First-run setup for a new profile; otherwise restore mid-workout or home.
+if (!currentProfile().onboarded) renderOnboarding(currentProfile().id, false);
+else if (active) renderWorkout();
+else renderHome();
 
 // Unlock the audio context on the first tap so the timer can make sound later
 // (iOS Safari blocks audio that didn't originate from a user gesture).

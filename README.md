@@ -60,14 +60,16 @@ change so the offline copy refreshes.
 ## Roadmap
 
 Next up (decided):
-- **Light & clean redesign** — port the locked "direction B" look (soft off-white
-  ground, white cards, one refined emerald accent) into the app, screen by screen.
 - **Multi-profile + smart injury-aware cautions (MVP)** — per-profile data with a
   switcher; a one-time setup (goal, experience, days/week, equipment, areas to
   protect); exercise "loads" tags so a ⚠ shows only for the areas that profile
   flagged (a healthy profile sees none). Existing data migrates into a "Me" profile.
 
 Ideas (not scheduled):
+- **Choose how many training days (1–7)** — the day-groups are currently fixed at 4
+  (Push / Pull / Full Body + Core / Core + Conditioning). Let the user pick how many
+  groups they have (1–7) and add / rename / remove them, not just edit the exercises
+  inside them. Pairs with the plan editor and the profile onboarding's "days per week".
 - Per-set RPE / "felt easy? / had pain?" tagging to sharpen and de-risk the progression suggestions
 - Pick-a-plan starter templates (Full Body, Push/Pull/Legs, Upper/Lower, bodyweight)
 - Auto-substitute risky exercises for safe alternatives based on the chosen injuries
