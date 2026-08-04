@@ -20,8 +20,11 @@ const BODY_AREAS = [
   { key: 'knees', label: 'Knees' },
   { key: 'shoulders', label: 'Shoulders' },
   { key: 'lower back', label: 'Lower back' },
-  { key: 'elbows', label: 'Elbows & wrists' },
+  { key: 'neck', label: 'Neck' },
+  { key: 'elbows', label: 'Elbows' },
+  { key: 'wrists', label: 'Wrists' },
   { key: 'hips', label: 'Hips' },
+  { key: 'ankles', label: 'Ankles' },
 ];
 
 const EXERCISE_LIBRARY = [
@@ -35,7 +38,7 @@ const EXERCISE_LIBRARY = [
   { name: 'Glute Bridge', group: 'Legs', tracks: 'bodyweight', sets: 3, reps: '12–15', notes: 'Posterior chain, knee-safe. Add a light bar to progress.' },
   { name: 'Box Squat', group: 'Legs', tracks: 'weight', sets: 3, reps: '8–10', notes: 'Sitting to a box controls depth — kinder to the knee.' },
   { name: 'Step-Ups (low box)', group: 'Legs', tracks: 'weight', sets: 3, reps: '10 each leg', notes: 'Shallow height, controlled.' },
-  { name: 'Standing Calf Raise', group: 'Legs', tracks: 'weight', sets: 3, reps: '12–15', notes: 'Full range, pause at the top.' },
+  { name: 'Standing Calf Raise', group: 'Legs', tracks: 'weight', sets: 3, reps: '12–15', notes: 'Full range, pause at the top.', loads: ['ankles'] },
   { name: 'Seated Calf Raise', group: 'Legs', tracks: 'weight', sets: 3, reps: '15', notes: 'Soleus focus.' },
   { name: 'Hip Abduction (machine)', group: 'Legs', tracks: 'weight', sets: 3, reps: '15', notes: 'Glute medius — good for knee tracking.' },
   { name: 'Hip Adduction (machine)', group: 'Legs', tracks: 'weight', sets: 3, reps: '15', notes: 'Inner thigh.' },
@@ -54,7 +57,7 @@ const EXERCISE_LIBRARY = [
   { name: 'Pec Deck', group: 'Chest', tracks: 'weight', sets: 3, reps: '12–15', notes: 'Chest isolation, supported.' },
   { name: 'Cable Crossover', group: 'Chest', tracks: 'weight', sets: 3, reps: '12–15', notes: 'Keep the range comfortable for the shoulder.' },
   { name: 'Incline Push-Up (hands elevated)', group: 'Chest', tracks: 'bodyweight', sets: 3, reps: '10–15', notes: 'Hands on a bench — much easier on the shoulder.' },
-  { name: 'Push-Up', group: 'Chest', tracks: 'bodyweight', sets: 3, reps: '8–15', notes: 'Classic bodyweight press.', loads: ['shoulders'] },
+  { name: 'Push-Up', group: 'Chest', tracks: 'bodyweight', sets: 3, reps: '8–15', notes: 'Classic bodyweight press.', loads: ['shoulders', 'wrists'] },
   { name: 'Dumbbell Bench Press', group: 'Chest', tracks: 'weight', sets: 3, reps: '8–12', notes: 'Free-weight horizontal press.', loads: ['shoulders'] },
   { name: 'Barbell Bench Press', group: 'Chest', tracks: 'weight', sets: 3, reps: '5–8', notes: 'Heavy horizontal press.', loads: ['shoulders'] },
 
@@ -75,12 +78,12 @@ const EXERCISE_LIBRARY = [
   { name: 'Cable Lateral Raise', group: 'Shoulders', tracks: 'weight', sets: 3, reps: '15', notes: 'Side delts, constant tension, controlled.' },
   { name: 'Dumbbell Lateral Raise', group: 'Shoulders', tracks: 'weight', sets: 3, reps: '12–15', notes: 'Keep it light, lead with the elbows.' },
   { name: 'Rear Delt Fly', group: 'Shoulders', tracks: 'weight', sets: 3, reps: '15', notes: 'Rear delts; great for posture.' },
-  { name: 'Shrugs', group: 'Shoulders', tracks: 'weight', sets: 3, reps: '12–15', notes: 'Traps; no overhead component.' },
+  { name: 'Shrugs', group: 'Shoulders', tracks: 'weight', sets: 3, reps: '12–15', notes: 'Traps; no overhead component.', loads: ['neck'] },
   { name: 'Front Raise', group: 'Shoulders', tracks: 'weight', sets: 3, reps: '12', notes: 'Front delts; keep it light.', loads: ['shoulders'] },
   { name: 'Machine Shoulder Press', group: 'Shoulders', tracks: 'weight', sets: 3, reps: '8–10', notes: 'Overhead press pattern.', loads: ['shoulders'] },
   { name: 'Dumbbell Shoulder Press', group: 'Shoulders', tracks: 'weight', sets: 3, reps: '8–10', notes: 'Overhead press.', loads: ['shoulders'] },
   { name: 'Arnold Press', group: 'Shoulders', tracks: 'weight', sets: 3, reps: '8–10', notes: 'Rotating overhead press.', loads: ['shoulders'] },
-  { name: 'Upright Row', group: 'Shoulders', tracks: 'weight', sets: 3, reps: '12', notes: 'Delts/traps; a common impingement trigger.', loads: ['shoulders'] },
+  { name: 'Upright Row', group: 'Shoulders', tracks: 'weight', sets: 3, reps: '12', notes: 'Delts/traps; a common impingement trigger.', loads: ['shoulders', 'neck'] },
 
   /* ---------------- Arms ---------------- */
   { name: 'Dumbbell Biceps Curl', group: 'Arms', tracks: 'weight', sets: 3, reps: '10–12', notes: 'Standard curl.' },
@@ -95,7 +98,7 @@ const EXERCISE_LIBRARY = [
   { name: 'Dips', group: 'Arms', tracks: 'bodyweight', sets: 3, reps: '8–12', notes: 'Triceps/chest, deep shoulder stretch.', loads: ['shoulders'] },
 
   /* ---------------- Core ---------------- */
-  { name: 'Plank', group: 'Core', tracks: 'time', sets: 3, reps: '30–45 sec', notes: 'Knees down if needed; build up over weeks.' },
+  { name: 'Plank', group: 'Core', tracks: 'time', sets: 3, reps: '30–45 sec', notes: 'Knees down if needed; build up over weeks.', loads: ['wrists'] },
   { name: 'Side Plank', group: 'Core', tracks: 'time', sets: 3, reps: '20–30 sec each', notes: 'Knee-supported version is fine.' },
   { name: 'Dead Bug', group: 'Core', tracks: 'bodyweight', sets: 3, reps: '10 each side', notes: 'Core stability, zero spinal load.' },
   { name: 'Bird Dog', group: 'Core', tracks: 'bodyweight', sets: 3, reps: '10 each side', notes: 'Core + balance.' },
@@ -104,7 +107,7 @@ const EXERCISE_LIBRARY = [
   { name: 'Cable Crunch', group: 'Core', tracks: 'weight', sets: 3, reps: '15', notes: 'Loaded flexion; move from the abs.', loads: ['lower back'] },
   { name: 'Lying Leg Raise', group: 'Core', tracks: 'bodyweight', sets: 3, reps: '12–15', notes: 'Lower abs; keep the low back down.', loads: ['lower back'] },
   { name: 'Russian Twist', group: 'Core', tracks: 'bodyweight', sets: 3, reps: '20 total', notes: 'Loaded rotation.', loads: ['lower back'] },
-  { name: 'Ab Wheel Rollout', group: 'Core', tracks: 'bodyweight', sets: 3, reps: '8–10', notes: 'Advanced anti-extension; brace hard.', loads: ['lower back'] },
+  { name: 'Ab Wheel Rollout', group: 'Core', tracks: 'bodyweight', sets: 3, reps: '8–10', notes: 'Advanced anti-extension; brace hard.', loads: ['lower back', 'wrists'] },
   { name: 'Hanging Knee Raise', group: 'Core', tracks: 'bodyweight', sets: 3, reps: '12', notes: 'Lower abs from a full hang.', loads: ['shoulders'] },
 
   /* ---------------- Cardio ---------------- */
@@ -116,5 +119,5 @@ const EXERCISE_LIBRARY = [
   { name: 'Swimming', group: 'Cardio', tracks: 'time', sets: 1, reps: '20 min', notes: 'Joint-friendly full-body cardio.' },
   { name: 'Assault Bike', group: 'Cardio', tracks: 'time', sets: 1, reps: '10 min', notes: 'Scalable intensity, low knee impact.' },
   { name: 'Stair Climber', group: 'Cardio', tracks: 'time', sets: 1, reps: '10–15 min', notes: 'Glutes + cardio, repetitive knee load.', loads: ['knees'] },
-  { name: 'Jump Rope', group: 'Cardio', tracks: 'time', sets: 1, reps: '5–10 min', notes: 'Conditioning; high impact.', loads: ['knees'] },
+  { name: 'Jump Rope', group: 'Cardio', tracks: 'time', sets: 1, reps: '5–10 min', notes: 'Conditioning; high impact.', loads: ['knees', 'ankles'] },
 ];

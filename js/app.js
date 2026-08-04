@@ -256,6 +256,11 @@ function cautionFor(def) {
   return hit.length ? `Loads your ${joinAreas(hit)} — ease in / get sign-off` : null;
 }
 
+// A "how to perform" link — opens a YouTube form/technique search for the move.
+function howToUrl(name) {
+  return 'https://www.youtube.com/results?search_query=' + encodeURIComponent(name + ' proper form technique');
+}
+
 // Top of a target range, e.g. "10–12" -> 12, "20 sec each side" -> 20.
 function targetTop(repsStr) {
   const nums = String(repsStr).match(/\d+/g);
@@ -446,8 +451,8 @@ function renderHome() {
           <span class="badge">${escapeHtml(d.name[0])}</span>
           <span class="dc-text">
             <div class="dc-name">${escapeHtml(d.name)}</div>
-            <div class="dc-sub">${escapeHtml(d.subtitle)}</div>
-            <div class="dc-meta">${escapeHtml(d.day)} · ${d.exercises.length} exercises</div>
+            <div class="dc-sub">${escapeHtml(d.subtitle || '')}</div>
+            <div class="dc-meta">${d.day ? escapeHtml(d.day) + ' · ' : ''}${d.exercises.length} exercise${d.exercises.length === 1 ? '' : 's'}</div>
           </span>
         </button>
         <button class="dc-edit" data-editday="${id}" aria-label="Edit ${escapeHtml(d.name)}">✎</button>
@@ -519,6 +524,7 @@ function renderHome() {
 
     ${resumeHtml}
     ${heroHtml}
+    ${currentProfile().conditions ? `<div class="cond-note"><b>Note:</b> ${escapeHtml(currentProfile().conditions)} — train accordingly and follow your clinician's advice.</div>` : ''}
 
     <div class="stat-grid">
       <div class="stat accent"><div class="num">${s.total}</div><div class="lbl">Workouts</div></div>
@@ -682,6 +688,7 @@ function renderWorkout() {
             <span class="ex-target">${escapeHtml(ex.target)}</span>
           </div>
           ${ex.notes ? `<div class="ex-note">${escapeHtml(ex.notes)}</div>` : ''}
+          <a class="howto" href="${howToUrl(ex.name)}" target="_blank" rel="noopener">How to perform ▸</a>
         </div>
         ${progHint}
         <div class="set-head"><span>#</span><span>${hideWeight ? 'Load' : 'Weight'}</span><span>${repsLabel}</span><span>✓</span><span></span></div>
@@ -702,7 +709,7 @@ function renderWorkout() {
       <button class="icon-btn" data-back aria-label="Back">‹</button>
       <div class="wk-head" style="flex:1;flex-direction:column;align-items:flex-start;gap:0">
         <div class="wk-title">${escapeHtml(day.name)}</div>
-        <div class="wk-sub">${day.day} · ${escapeHtml(day.subtitle)}</div>
+        <div class="wk-sub">${day.day ? escapeHtml(day.day) + ' · ' : ''}${escapeHtml(day.subtitle || '')}</div>
       </div>
       <div class="wk-elapsed" id="wk-elapsed" aria-label="Elapsed workout time">0:00</div>
     </header>
@@ -916,14 +923,7 @@ function buildActiveEx(def) {
 // only (the saved plan is untouched).
 function renderSessionPicker(mode, ei) {
   const title = mode === 'swap' ? 'Swap exercise' : 'Add exercise';
-  const onPick = (e) => {
-    const built = buildActiveEx(e);
-    if (mode === 'swap') active.exercises[ei] = built;
-    else active.exercises.push(built);
-    save(KEY.active, active);
-    renderWorkout();
-    toast(mode === 'swap' ? 'Swapped' : 'Added');
-  };
+  const onPick = (e) => applySessionEx(mode, ei, e);
   document.getElementById('app').innerHTML = `
     <header class="app-header">
       <button class="icon-btn" data-back aria-label="Back">‹</button>
@@ -931,16 +931,66 @@ function renderSessionPicker(mode, ei) {
     </header>
     <input id="lib-search" class="lib-search" type="search" autocomplete="off"
            placeholder="Search ${EXERCISE_LIBRARY.length} exercises…" />
-    <p class="muted" style="font-size:12px;margin:0 2px 12px">${mode === 'swap' ? 'Pick a replacement' : 'Pick something to add'} for today only — your saved plan isn’t changed.${currentProfile().protect.length ? ' ⚠ marks moves that load a joint you’re protecting.' : ''}</p>
+    <p class="muted" style="font-size:12px;margin:0 2px 10px">${mode === 'swap' ? 'Pick a replacement' : 'Pick something to add'} for today only — your saved plan isn’t changed.${currentProfile().protect.length ? ' ⚠ marks moves that load a joint you’re protecting.' : ''}</p>
+    <button class="btn btn-ghost btn-block" data-customex style="margin-bottom:12px">+ Add a custom exercise</button>
     <div id="lib-list">${libraryListHtml('')}</div>
   `;
   $('[data-back]').addEventListener('click', renderWorkout);
+  $('[data-customex]').addEventListener('click', () => renderSessionCustom(mode, ei));
   const search = $('#lib-search');
   search.addEventListener('input', () => {
     $('#lib-list').innerHTML = libraryListHtml(search.value);
     bindLibraryPicks(onPick);
   });
   bindLibraryPicks(onPick);
+}
+
+function applySessionEx(mode, ei, def) {
+  const built = buildActiveEx(def);
+  if (mode === 'swap') active.exercises[ei] = built;
+  else active.exercises.push(built);
+  save(KEY.active, active);
+  renderWorkout();
+  toast(mode === 'swap' ? 'Swapped' : 'Added');
+}
+
+// Add a not-in-the-library exercise to the current workout only.
+function renderSessionCustom(mode, ei) {
+  document.getElementById('app').innerHTML = `
+    <header class="app-header">
+      <button class="icon-btn" data-back aria-label="Back">‹</button>
+      <div class="wk-head" style="flex:1"><div class="wk-title">Custom exercise</div></div>
+    </header>
+    <div class="form">
+      <label class="fld"><span>Name</span>
+        <input id="c-name" type="text" placeholder="e.g. Cable Pull-Through" /></label>
+      <div class="fld-row">
+        <label class="fld"><span>Sets</span>
+          <input id="c-sets" type="number" inputmode="numeric" min="1" max="10" value="3" /></label>
+        <label class="fld"><span>Reps / target</span>
+          <input id="c-reps" type="text" value="12" /></label>
+      </div>
+      <label class="fld"><span>Type</span>
+        <select id="c-tracks">
+          <option value="weight">Weighted (weight + reps)</option>
+          <option value="bodyweight">Bodyweight (reps)</option>
+          <option value="time">Time / hold (seconds)</option>
+        </select></label>
+      <button class="btn btn-block btn-lg mt16" data-save>${mode === 'swap' ? 'Swap in' : 'Add to workout'}</button>
+    </div>
+  `;
+  $('[data-back]').addEventListener('click', () => renderSessionPicker(mode, ei));
+  $('[data-save]').addEventListener('click', () => {
+    const name = $('#c-name').value.trim();
+    if (!name) { toast('Give it a name'); $('#c-name').focus(); return; }
+    applySessionEx(mode, ei, {
+      name,
+      sets: Math.max(1, Math.min(10, Math.round(num($('#c-sets').value)) || 1)),
+      reps: $('#c-reps').value.trim() || '10',
+      tracks: $('#c-tracks').value,
+      notes: '',
+    });
+  });
 }
 
 function finishWorkout() {
@@ -1007,12 +1057,39 @@ function renderPlanPicker() {
       <button class="icon-btn" data-back aria-label="Back">‹</button>
       <div class="wk-head" style="flex:1"><div class="wk-title">Customize exercises</div></div>
     </header>
-    <p class="muted" style="font-size:13px;margin:0 2px 14px">Pick a day to add, edit, reorder or remove exercises. Changes apply to your next workout.</p>
+    <p class="muted" style="font-size:13px;margin:0 2px 14px">Pick a day to rename it or add, edit, reorder and remove exercises. Changes apply to your next workout.</p>
     ${cards}
+    <button class="btn btn-block mt8" data-addday>+ Add a day</button>
   `;
   $('[data-back]').addEventListener('click', renderHome);
   document.querySelectorAll('[data-editday]').forEach((b) =>
     b.addEventListener('click', () => renderDayEditor(b.dataset.editday)));
+  $('[data-addday]').addEventListener('click', addDay);
+}
+
+function addDay() {
+  if (userPlan.order.length >= 7) { toast('7 days is the max'); return; }
+  const id = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  userPlan.days[id] = { id, name: 'New day', day: '', subtitle: '', exercises: [] };
+  userPlan.order.push(id);
+  savePlan();
+  renderDayEditor(id);
+}
+
+function renameDay(dayId) {
+  const d = userPlan.days[dayId];
+  d.name = ($('#d-name').value.trim() || 'Day');
+  d.subtitle = $('#d-sub').value.trim();
+  savePlan();
+}
+
+function deleteDay(dayId) {
+  if (userPlan.order.length <= 1) { toast("Can't remove your only day"); return; }
+  userPlan.order = userPlan.order.filter((x) => x !== dayId);
+  delete userPlan.days[dayId];
+  savePlan();
+  toast('Day removed');
+  renderPlanPicker();
 }
 
 function renderDayEditor(dayId) {
@@ -1036,26 +1113,37 @@ function renderDayEditor(dayId) {
       <button class="icon-btn" data-back aria-label="Back">‹</button>
       <div class="wk-head" style="flex:1;flex-direction:column;align-items:flex-start;gap:0">
         <div class="wk-title">${escapeHtml(d.name)}</div>
-        <div class="wk-sub">Edit exercises</div>
+        <div class="wk-sub">Edit day</div>
       </div>
     </header>
+    <div class="form" style="margin-bottom:18px">
+      <label class="fld"><span>Day name</span><input id="d-name" type="text" value="${escapeHtml(d.name)}" placeholder="e.g. Upper body" /></label>
+      <label class="fld"><span>Subtitle (optional)</span><input id="d-sub" type="text" value="${escapeHtml(d.subtitle || '')}" placeholder="e.g. Chest, back, arms" /></label>
+    </div>
+    <div class="section-title">Exercises</div>
     ${rows || '<div class="empty">No exercises yet. Add one below.</div>'}
     <button class="btn btn-block mt16" data-addlib>+ Add from library</button>
     <button class="btn btn-ghost btn-block mt8" data-addex>+ Add custom exercise</button>
-    <button class="btn btn-ghost btn-block mt8" data-resetday>Reset this day to default</button>
+    ${PLAN[dayId] ? '<button class="btn btn-ghost btn-block mt8" data-resetday>Reset this day to default</button>' : ''}
+    ${userPlan.order.length > 1 ? '<button class="btn btn-ghost btn-block mt8" data-delday>Remove this day</button>' : ''}
     <p class="center muted mt16" style="font-size:12px">Changes apply to your next workout, not one in progress.</p>
   `;
-  $('[data-back]').addEventListener('click', renderPlanPicker);
-  $('[data-addlib]').addEventListener('click', () => renderLibraryPicker(dayId));
+  $('[data-back]').addEventListener('click', () => { renameDay(dayId); renderPlanPicker(); });
+  $('#d-name').addEventListener('change', () => renameDay(dayId));
+  $('#d-sub').addEventListener('change', () => renameDay(dayId));
+  $('[data-addlib]').addEventListener('click', () => { renameDay(dayId); renderLibraryPicker(dayId); });
   document.querySelectorAll('[data-up]').forEach((b) => b.addEventListener('click', () => moveEx(dayId, +b.dataset.up, -1)));
   document.querySelectorAll('[data-down]').forEach((b) => b.addEventListener('click', () => moveEx(dayId, +b.dataset.down, +1)));
-  document.querySelectorAll('[data-editex]').forEach((b) => b.addEventListener('click', () => renderExerciseForm(dayId, +b.dataset.editex)));
+  document.querySelectorAll('[data-editex]').forEach((b) => b.addEventListener('click', () => { renameDay(dayId); renderExerciseForm(dayId, +b.dataset.editex); }));
   document.querySelectorAll('[data-delex]').forEach((b) => b.addEventListener('click', () => delEx(dayId, +b.dataset.delex)));
-  $('[data-addex]').addEventListener('click', () => renderExerciseForm(dayId, null));
-  $('[data-resetday]').addEventListener('click', (e) => armThen(e.target, 'Tap again to reset', () => {
+  $('[data-addex]').addEventListener('click', () => { renameDay(dayId); renderExerciseForm(dayId, null); });
+  const rd = $('[data-resetday]');
+  if (rd) rd.addEventListener('click', (e) => armThen(e.target, 'Tap again to reset', () => {
     if (PLAN[dayId]) userPlan.days[dayId] = JSON.parse(JSON.stringify(PLAN[dayId]));
     savePlan(); renderDayEditor(dayId); toast('Reset to default');
   }));
+  const dd = $('[data-delday]');
+  if (dd) dd.addEventListener('click', (e) => armThen(e.target, 'Tap again to remove day', () => deleteDay(dayId)));
 }
 
 function moveEx(dayId, i, dir) {
@@ -1088,6 +1176,7 @@ function renderExerciseForm(dayId, idx, prefill) {
       <div class="wk-head" style="flex:1"><div class="wk-title">${editing ? 'Edit exercise' : 'Add exercise'}</div></div>
     </header>
     ${cautionBanner}
+    ${ex.name ? `<a class="howto" href="${howToUrl(ex.name)}" target="_blank" rel="noopener" style="display:inline-block;margin:0 0 12px 2px">How to perform ${escapeHtml(ex.name)} ▸</a>` : ''}
     <div class="form">
       <label class="fld"><span>Name</span>
         <input id="f-name" type="text" value="${escapeHtml(ex.name)}" placeholder="e.g. Seated Cable Row" /></label>
@@ -1495,9 +1584,10 @@ function syncWake() {
 function renderProfiles() {
   const rows = profiles.list.map((p) => {
     const cur = p.id === profiles.currentId;
-    const areas = (p.protect && p.protect.length)
+    const areasTxt = (p.protect && p.protect.length)
       ? p.protect.map((a) => (BODY_AREAS.find((x) => x.key === a) || {}).label || a).join(', ')
       : 'No injuries flagged';
+    const areas = p.conditions ? `${areasTxt} · ${p.conditions}` : areasTxt;
     return `
       <div class="prof-row ${cur ? 'current' : ''}">
         <button class="prof-hit" data-switch="${p.id}">
@@ -1589,8 +1679,11 @@ function renderOnboarding(id, isNew) {
         <select id="o-equip">${['full gym', 'dumbbells only', 'home rack', 'bodyweight only'].map((g) => `<option ${opt(p.equipment, g)}>${g}</option>`).join('')}</select></label>
       <div class="fld"><span>Areas to protect</span>
         <div class="area-chips">${areaChips}</div>
-        <div class="muted" style="font-size:12px;margin-top:4px">Tap any joints that give you trouble — the app flags exercises that load them. Leave all off if you have none.</div>
+        <div class="muted" style="font-size:12px;margin-top:4px">Tap any areas that give you trouble — the app flags exercises that load them. Leave all off if you have none.</div>
       </div>
+      <label class="fld"><span>Anything else to note? (optional)</span>
+        <input id="o-conditions" type="text" value="${escapeHtml(p.conditions || '')}" placeholder="e.g. pregnancy, heart condition, hernia" /></label>
+      <div class="muted" style="font-size:12px;margin-top:-4px">A personal reminder only — the app won’t auto-screen exercises for these. Please clear them with your GP or physio.</div>
       <button class="btn btn-block btn-lg mt16" data-save>${isNew ? 'Create profile' : 'Save'}</button>
     </div>
   `;
@@ -1610,6 +1703,7 @@ function renderOnboarding(id, isNew) {
     p.days = Math.max(1, Math.min(7, Math.round(num($('#o-days').value)) || 3));
     p.equipment = $('#o-equip').value;
     p.protect = [...chosen];
+    p.conditions = $('#o-conditions').value.trim();
     p.onboarded = true;
     saveProfiles();
     toast(isNew ? 'Profile created' : 'Saved');
@@ -1688,7 +1782,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v10 · data stored on this device</p>`;
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v11 · data stored on this device</p>`;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
   $('#set-profiles').addEventListener('click', renderProfiles);
