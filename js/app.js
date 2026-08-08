@@ -1367,6 +1367,27 @@ const RING_LEN = 2 * Math.PI * 54; // circumference
 
 let timer = { endAt: 0, total: 0, remaining: 0, interval: 0, paused: false, done: false, wakeLock: null };
 
+// Lock the page behind the timer sheet so the dashboard/workout doesn't scroll
+// while the sheet is open (iOS-safe: pin the body and restore scroll on close).
+let lockedScrollY = 0;
+function lockScroll() {
+  lockedScrollY = window.scrollY || document.documentElement.scrollTop || 0;
+  document.body.style.position = 'fixed';
+  document.body.style.top = `-${lockedScrollY}px`;
+  document.body.style.left = '0';
+  document.body.style.right = '0';
+  document.body.style.width = '100%';
+}
+function unlockScroll() {
+  if (document.body.style.position !== 'fixed') return;
+  document.body.style.position = '';
+  document.body.style.top = '';
+  document.body.style.left = '';
+  document.body.style.right = '';
+  document.body.style.width = '';
+  window.scrollTo(0, lockedScrollY);
+}
+
 // Standalone rest timer — use the countdown without tracking a workout.
 function startStandaloneTimer() {
   unlockAudio();
@@ -1382,6 +1403,7 @@ function startTimer(seconds) {
   timer.lastTick = null;
   buildTimerPresets();
   timerSheet.hidden = false;
+  lockScroll();
   timerCount.classList.remove('done');
   const pb = $('#timer-pause');
   pb.textContent = 'Pause';
@@ -1473,6 +1495,7 @@ function togglePause() {
 
 function closeTimer() {
   timerSheet.hidden = true;
+  unlockScroll();
   clearInterval(timer.interval);
   clearTimeout(timer.closeTO);
   syncWake();   // keep lock if still on the workout screen, else release
@@ -1782,7 +1805,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v11 · data stored on this device</p>`;
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v12 · data stored on this device</p>`;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
   $('#set-profiles').addEventListener('click', renderProfiles);
