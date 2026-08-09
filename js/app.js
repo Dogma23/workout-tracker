@@ -698,6 +698,8 @@ function renderWorkout() {
         </div>
         ${prev ? `<div class="last-hint">Last time: <b>${prev.weight || 'BW'} ${prev.weight ? settings.unit : ''}</b>${prev.reps ? ' × ' + escapeHtml(String(prev.reps)) : ''}</div>` : ''}
         <div class="ex-actions">
+          <button class="mini-btn" data-upex="${ei}" ${ei === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
+          <button class="mini-btn" data-downex="${ei}" ${ei === active.exercises.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button>
           <button class="ex-action" data-swapex="${ei}">⇄ Swap</button>
           <button class="ex-action danger" data-removeex="${ei}">✕ Remove</button>
         </div>
@@ -722,7 +724,7 @@ function renderWorkout() {
     ${warmup}
     ${exBlocks}
 
-    <button class="btn btn-ghost btn-block" data-addexercise>+ Add exercise (machine taken?)</button>
+    <button class="btn btn-ghost btn-block" data-addexercise>+ Add exercise</button>
 
     <div class="finish-bar">
       <button class="btn btn-ghost" data-discard style="flex:0 0 auto">Discard</button>
@@ -813,6 +815,12 @@ function wireWorkout() {
       const row = e.target.closest('.set-row');
       delSet(num(row.dataset.ex), num(row.dataset.set));
     }));
+
+  // reorder an exercise within the workout
+  document.querySelectorAll('[data-upex]').forEach((b) =>
+    b.addEventListener('click', () => moveActiveEx(num(b.dataset.upex), -1)));
+  document.querySelectorAll('[data-downex]').forEach((b) =>
+    b.addEventListener('click', () => moveActiveEx(num(b.dataset.downex), +1)));
 
   // swap / remove an exercise (this session only)
   document.querySelectorAll('[data-swapex]').forEach((b) =>
@@ -919,21 +927,28 @@ function buildActiveEx(def) {
   };
 }
 
-// Library picker used mid-workout to add or swap an exercise for THIS session
-// only (the saved plan is untouched).
+// Library picker used mid-workout. 'add' saves to the plan; 'swap' is today-only
+// and opens pre-filtered to the same body part as the exercise being swapped.
 function renderSessionPicker(mode, ei) {
   const title = mode === 'swap' ? 'Swap exercise' : 'Add exercise';
+  const group = (mode === 'swap' && ei != null) ? groupForName(active.exercises[ei].name) : '';
+  const initialQ = group;   // pre-filter swaps to the same muscle group
   const onPick = (e) => applySessionEx(mode, ei, e);
+  const intro = mode === 'swap'
+    ? (group
+        ? `Swapping for today — showing <b>${escapeHtml(group)}</b> options to match. Clear the search to see everything.`
+        : 'Pick a replacement for today only — your saved plan isn’t changed.')
+    : 'Adds it to this workout and saves it to your plan for next time.';
   document.getElementById('app').innerHTML = `
     <header class="app-header">
       <button class="icon-btn" data-back aria-label="Back">‹</button>
       <div class="wk-head" style="flex:1"><div class="wk-title">${title}</div></div>
     </header>
     <input id="lib-search" class="lib-search" type="search" autocomplete="off"
-           placeholder="Search ${EXERCISE_LIBRARY.length} exercises…" />
-    <p class="muted" style="font-size:12px;margin:0 2px 10px">${mode === 'swap' ? 'Pick a replacement' : 'Pick something to add'} for today only — your saved plan isn’t changed.${currentProfile().protect.length ? ' ⚠ marks moves that load a joint you’re protecting.' : ''}</p>
+           placeholder="Search ${EXERCISE_LIBRARY.length} exercises…" value="${escapeHtml(initialQ)}" />
+    <p class="muted" style="font-size:12px;margin:0 2px 10px">${intro}${currentProfile().protect.length ? ' ⚠ marks moves that load a joint you’re protecting.' : ''}</p>
     <button class="btn btn-ghost btn-block" data-customex style="margin-bottom:12px">+ Add a custom exercise</button>
-    <div id="lib-list">${libraryListHtml('')}</div>
+    <div id="lib-list">${libraryListHtml(initialQ)}</div>
   `;
   $('[data-back]').addEventListener('click', renderWorkout);
   $('[data-customex]').addEventListener('click', () => renderSessionCustom(mode, ei));
@@ -947,11 +962,36 @@ function renderSessionPicker(mode, ei) {
 
 function applySessionEx(mode, ei, def) {
   const built = buildActiveEx(def);
-  if (mode === 'swap') active.exercises[ei] = built;
-  else active.exercises.push(built);
+  if (mode === 'swap') {
+    active.exercises[ei] = built;               // swap is today-only
+  } else {
+    active.exercises.push(built);
+    // also keep it in the saved plan so it's there next time
+    const day = userPlan.days[active.dayId];
+    if (day) {
+      day.exercises.push({ name: def.name, sets: def.sets, reps: def.reps, tracks: def.tracks, notes: def.notes || '' });
+      savePlan();
+    }
+  }
   save(KEY.active, active);
   renderWorkout();
-  toast(mode === 'swap' ? 'Swapped' : 'Added');
+  toast(mode === 'swap' ? 'Swapped for today' : 'Added to your plan');
+}
+
+// Look up which body-part group a named exercise belongs to (library only).
+function groupForName(name) {
+  const e = EXERCISE_LIBRARY.find((x) => x.name === name);
+  return e ? e.group : '';
+}
+
+// Reorder an exercise within the current workout (session order only).
+function moveActiveEx(ei, dir) {
+  const arr = active.exercises;
+  const j = ei + dir;
+  if (j < 0 || j >= arr.length) return;
+  [arr[ei], arr[j]] = [arr[j], arr[ei]];
+  save(KEY.active, active);
+  renderWorkout();
 }
 
 // Add a not-in-the-library exercise to the current workout only.
@@ -1221,8 +1261,12 @@ function renderExerciseForm(dayId, idx, prefill) {
  * ================================================================== */
 function libraryListHtml(q) {
   const query = q.trim().toLowerCase();
-  const match = (e) => !query || e.name.toLowerCase().includes(query)
-    || e.group.toLowerCase().includes(query) || (e.notes && e.notes.toLowerCase().includes(query));
+  // If the query is exactly a body-part name (e.g. the swap pre-fill), show ONLY
+  // that group. Otherwise do a loose search across name/group/notes.
+  const exactGroup = LIBRARY_GROUPS.find((g) => g.toLowerCase() === query);
+  const match = (e) => exactGroup ? e.group === exactGroup
+    : (!query || e.name.toLowerCase().includes(query)
+      || e.group.toLowerCase().includes(query) || (e.notes && e.notes.toLowerCase().includes(query)));
   let html = '';
   LIBRARY_GROUPS.forEach((g) => {
     const items = EXERCISE_LIBRARY.filter((e) => e.group === g && match(e));
@@ -1805,7 +1849,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v12 · data stored on this device</p>`;
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v13 · data stored on this device</p>`;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
   $('#set-profiles').addEventListener('click', renderProfiles);
