@@ -10,6 +10,7 @@ screen (it's a PWA). No accounts, no server — your data lives on your device.
 - **Four workout days built in** — Push, Pull, Full Body + Core, Core + Conditioning — with your exact exercises, sets, reps and injury notes.
 - **Weight + reps logging** per set, with your last-used weight pre-filled next time. Add or delete sets on the fly, and if a machine is taken you can **swap, add or remove an exercise mid-workout** (just for that session — your saved plan is untouched).
 - **Rest timer** that auto-starts when you tick a set complete. Pick the interval (30 / 45 / 60 / 90 / 120 / 180s or a custom value), ±15s on the fly. The screen is kept awake for the whole workout so the phone won't auto-lock mid-session and miss the beep. You can also run the timer on its own — tap the ⏱ button on the home screen — for when you just want a timer without logging a workout.
+- **Supersets** — in a day editor, tap **Link as superset** between two (or more) consecutive exercises to pair them. During the workout they render as one linked block and you log each move's sets on its own card — but the rest timer stays quiet between them and only fires after the last move in the group, so you go straight from one exercise into the next. Tap the connector again to unlink.
 
 > **Note on sound while the phone is locked:** if you manually lock an iPhone (or leave the app), the browser suspends the page — timers and sound can't run in the background, and there's no web workaround for that. Keeping the app on-screen (the workout keeps the screen awake for you) means the beep fires on time, even with music playing in the background.
 - **Timer sounds** — a soft start cue, a 3·2·1 countdown blip, and an ascending finish chime (plus vibrate). All generated in-app with the Web Audio API, so nothing to download and it works offline. Toggle in Settings.
@@ -59,21 +60,23 @@ change so the offline copy refreshes.
 
 ## Roadmap
 
-Next up (decided):
-- **Multi-profile + smart injury-aware cautions (MVP)** — per-profile data with a
-  switcher; a one-time setup (goal, experience, days/week, equipment, areas to
-  protect); exercise "loads" tags so a ⚠ shows only for the areas that profile
-  flagged (a healthy profile sees none). Existing data migrates into a "Me" profile.
+Under analysis (paused):
+- **PT plan sharing — Option A** — trainers set up a company profile and share a
+  branded workout plan with clients via a link (no backend); clients import in one
+  tap. Direction chosen (one-time unlock, target = beginner PTs on PDFs/WhatsApp,
+  stay web not native). Paused pending demand validation. The full commercial SaaS
+  version is shelved unless demand shows.
 
 Ideas (not scheduled):
-- **Choose how many training days (1–7)** — the day-groups are currently fixed at 4
-  (Push / Pull / Full Body + Core / Core + Conditioning). Let the user pick how many
-  groups they have (1–7) and add / rename / remove them, not just edit the exercises
-  inside them. Pairs with the plan editor and the profile onboarding's "days per week".
 - Per-set RPE / "felt easy? / had pain?" tagging to sharpen and de-risk the progression suggestions
 - Pick-a-plan starter templates (Full Body, Push/Pull/Legs, Upper/Lower, bodyweight)
 - Auto-substitute risky exercises for safe alternatives based on the chosen injuries
 - Cloud sync / backup
+
+Recently shipped: light redesign · multi-profile · smart injury-aware cautions ·
+1–7 custom training days (add/rename/remove) · exercise library · hydration
+reminders · workout timer/clock · how-to links · mid-workout add/swap/reorder ·
+supersets (grouping + smart rest).
 
 ---
 

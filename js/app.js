@@ -618,6 +618,7 @@ function startWorkout(dayId) {
       reps: ex.reps,
       notes: ex.notes,
       tracks: ex.tracks,
+      group: ex.group,   // superset membership (carried from the plan)
       sets: Array.from({ length: ex.sets }, () => {
         const prev = last[ex.name];
         return {
@@ -651,7 +652,7 @@ function renderWorkout() {
       <ol>${wu.steps.map((w) => `<li>${escapeHtml(w)}</li>`).join('')}</ol>
     </details>`;
 
-  const exBlocks = active.exercises.map((ex, ei) => {
+  const exCardHtml = (ex, ei) => {
     const allDone = ex.sets.every((s) => s.done);
     const isTime = ex.tracks === 'time';
     const hideWeight = ex.tracks === 'bodyweight';
@@ -704,7 +705,25 @@ function renderWorkout() {
           <button class="ex-action danger" data-removeex="${ei}">✕ Remove</button>
         </div>
       </div>`;
-  }).join('');
+  };
+
+  // Render exercises, wrapping consecutive same-group ones in a superset block.
+  let exBlocks = '';
+  for (let bi = 0; bi < active.exercises.length;) {
+    const g = active.exercises[bi].group;
+    const run = [];
+    let bj = bi;
+    while (g && bj < active.exercises.length && active.exercises[bj].group === g) { run.push(bj); bj++; }
+    if (run.length >= 2) {
+      exBlocks += `<div class="superset"><div class="superset-hd">⛓ Superset · no rest between</div>`
+        + run.map((ei) => exCardHtml(active.exercises[ei], ei)).join('')
+        + `</div>`;
+      bi = bj;
+    } else {
+      exBlocks += exCardHtml(active.exercises[bi], bi);
+      bi += 1;
+    }
+  }
 
   document.getElementById('app').innerHTML = `
     <header class="app-header">
@@ -828,6 +847,7 @@ function wireWorkout() {
   document.querySelectorAll('[data-removeex]').forEach((b) =>
     b.addEventListener('click', (e) => armThen(e.target, '✕ Remove?', () => {
       active.exercises.splice(num(e.target.dataset.removeex), 1);
+      normalizeGroups(active.exercises);
       save(KEY.active, active);
       renderWorkout();
       toast('Exercise removed');
@@ -885,7 +905,15 @@ function onCheck(e) {
     if (repsInput && !repsInput.value) repsInput.value = set.reps;
     save(KEY.active, active);
     unlockAudio();
-    startTimer(active.rest);
+    // Superset smart-rest: if the next exercise is in the same group, no rest —
+    // go straight into it. Only rest after the last move in the group.
+    const cur = active.exercises[ei];
+    const next = active.exercises[ei + 1];
+    if (cur.group && next && next.group === cur.group) {
+      toast(`⛓ Straight into ${next.name} — no rest`);
+    } else {
+      startTimer(active.rest);
+    }
   } else {
     row.classList.remove('done');
     e.target.classList.remove('on');
@@ -984,12 +1012,68 @@ function groupForName(name) {
   return e ? e.group : '';
 }
 
+// --- Supersets -------------------------------------------------------------
+// A superset = 2+ CONSECUTIVE exercises that share the same `group` id.
+// Normalize rebuilds ids so only maximal consecutive runs of length >= 2 keep
+// an id; anything else (singletons, split runs after a reorder/delete) is
+// cleared. Call after any structural change to an exercise list.
+function normalizeGroups(arr) {
+  let gi = 0;
+  let i = 0;
+  while (i < arr.length) {
+    const g = arr[i].group;
+    if (!g) { i += 1; continue; }
+    let j = i;
+    while (j < arr.length && arr[j].group === g) j += 1;
+    if (j - i >= 2) {
+      gi += 1;
+      const id = 'g' + gi;
+      for (let k = i; k < j; k += 1) arr[k].group = id;
+    } else {
+      arr[i].group = undefined;
+    }
+    i = j;
+  }
+}
+
+// Merge the runs on either side of the i / i+1 boundary into one superset.
+function linkPlanEx(dayId, i) {
+  const arr = userPlan.days[dayId].exercises;
+  if (i < 0 || i + 1 >= arr.length) return;
+  const ga = arr[i].group;
+  const gb = arr[i + 1].group;
+  const id = ga || gb || ('g' + Date.now().toString(36));
+  if (ga) { for (let k = i; k >= 0 && arr[k].group === ga; k -= 1) arr[k].group = id; }
+  else arr[i].group = id;
+  if (gb) { for (let k = i + 1; k < arr.length && arr[k].group === gb; k += 1) arr[k].group = id; }
+  else arr[i + 1].group = id;
+  normalizeGroups(arr);
+  savePlan();
+  renderDayEditor(dayId);
+  toast('⛓ Linked as superset');
+}
+
+// Break the superset at the i / i+1 boundary.
+function unlinkPlanEx(dayId, i) {
+  const arr = userPlan.days[dayId].exercises;
+  if (i < 0 || i + 1 >= arr.length) return;
+  const g = arr[i].group;
+  if (!g || arr[i + 1].group !== g) return;
+  const nid = 'g' + Date.now().toString(36);
+  for (let k = i + 1; k < arr.length && arr[k].group === g; k += 1) arr[k].group = nid;
+  normalizeGroups(arr);
+  savePlan();
+  renderDayEditor(dayId);
+  toast('Unlinked');
+}
+
 // Reorder an exercise within the current workout (session order only).
 function moveActiveEx(ei, dir) {
   const arr = active.exercises;
   const j = ei + dir;
   if (j < 0 || j >= arr.length) return;
   [arr[ei], arr[j]] = [arr[j], arr[ei]];
+  normalizeGroups(arr);
   save(KEY.active, active);
   renderWorkout();
 }
@@ -1134,19 +1218,34 @@ function deleteDay(dayId) {
 
 function renderDayEditor(dayId) {
   const d = userPlan.days[dayId];
-  const rows = d.exercises.map((ex, i) => `
-    <div class="edit-row">
+  const list = d.exercises;
+  const parts = [];
+  list.forEach((ex, i) => {
+    const g = ex.group;
+    const prevSame = i > 0 && g && list[i - 1].group === g;
+    const nextSame = i < list.length - 1 && g && list[i + 1].group === g;
+    const ss = (prevSame || nextSame) ? ' in-superset' : '';
+    parts.push(`
+    <div class="edit-row${ss}">
       <div class="edit-main">
         <div class="edit-name">${escapeHtml(ex.name)}${cautionFor(ex) ? ' <span class="lib-warn">⚠</span>' : ''}</div>
         <div class="edit-meta">${ex.sets} × ${escapeHtml(ex.reps)} · ${TRACK_LABELS[ex.tracks] || ex.tracks}</div>
       </div>
       <div class="edit-actions">
         <button class="mini-btn" data-up="${i}" ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
-        <button class="mini-btn" data-down="${i}" ${i === d.exercises.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button>
+        <button class="mini-btn" data-down="${i}" ${i === list.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button>
         <button class="mini-btn" data-editex="${i}" aria-label="Edit">✎</button>
         <button class="mini-btn danger" data-delex="${i}" aria-label="Delete">✕</button>
       </div>
-    </div>`).join('');
+    </div>`);
+    if (i < list.length - 1) {
+      const linked = g && list[i + 1].group === g;
+      parts.push(linked
+        ? `<div class="link-row linked"><button class="link-btn" data-unlink="${i}">⛓ Superset — tap to unlink</button></div>`
+        : `<div class="link-row"><button class="link-btn ghost" data-link="${i}">+ Link as superset</button></div>`);
+    }
+  });
+  const rows = parts.join('');
 
   document.getElementById('app').innerHTML = `
     <header class="app-header">
@@ -1161,6 +1260,7 @@ function renderDayEditor(dayId) {
       <label class="fld"><span>Subtitle (optional)</span><input id="d-sub" type="text" value="${escapeHtml(d.subtitle || '')}" placeholder="e.g. Chest, back, arms" /></label>
     </div>
     <div class="section-title">Exercises</div>
+    <p class="muted" style="font-size:12px;margin:-4px 0 10px">Tap <b>Link as superset</b> between two moves to pair them — you'll do them back-to-back with no rest, and the timer only starts after the last one.</p>
     ${rows || '<div class="empty">No exercises yet. Add one below.</div>'}
     <button class="btn btn-block mt16" data-addlib>+ Add from library</button>
     <button class="btn btn-ghost btn-block mt8" data-addex>+ Add custom exercise</button>
@@ -1176,6 +1276,8 @@ function renderDayEditor(dayId) {
   document.querySelectorAll('[data-down]').forEach((b) => b.addEventListener('click', () => moveEx(dayId, +b.dataset.down, +1)));
   document.querySelectorAll('[data-editex]').forEach((b) => b.addEventListener('click', () => { renameDay(dayId); renderExerciseForm(dayId, +b.dataset.editex); }));
   document.querySelectorAll('[data-delex]').forEach((b) => b.addEventListener('click', () => delEx(dayId, +b.dataset.delex)));
+  document.querySelectorAll('[data-link]').forEach((b) => b.addEventListener('click', () => linkPlanEx(dayId, +b.dataset.link)));
+  document.querySelectorAll('[data-unlink]').forEach((b) => b.addEventListener('click', () => unlinkPlanEx(dayId, +b.dataset.unlink)));
   $('[data-addex]').addEventListener('click', () => { renameDay(dayId); renderExerciseForm(dayId, null); });
   const rd = $('[data-resetday]');
   if (rd) rd.addEventListener('click', (e) => armThen(e.target, 'Tap again to reset', () => {
@@ -1191,6 +1293,7 @@ function moveEx(dayId, i, dir) {
   const j = i + dir;
   if (j < 0 || j >= arr.length) return;
   [arr[i], arr[j]] = [arr[j], arr[i]];
+  normalizeGroups(arr);
   savePlan();
   renderDayEditor(dayId);
 }
@@ -1199,6 +1302,7 @@ function delEx(dayId, i) {
   const btn = document.querySelector(`[data-delex="${i}"]`);
   armThen(btn, '✓?', () => {
     userPlan.days[dayId].exercises.splice(i, 1);
+    normalizeGroups(userPlan.days[dayId].exercises);
     savePlan(); renderDayEditor(dayId); toast('Exercise removed');
   });
 }
@@ -1849,7 +1953,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v13 · data stored on this device</p>`;
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v14 · data stored on this device</p>`;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
   $('#set-profiles').addEventListener('click', renderProfiles);

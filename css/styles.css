@@ -257,6 +257,50 @@ input, select { font-family: inherit; }
 .mini-btn.armed { background: var(--danger); color: #fff; border-color: var(--danger); }
 .btn.armed, .btn-ghost.armed { background: var(--danger); color: #fff; border-color: var(--danger); }
 
+/* ---------- Superset linking (plan editor) ---------- */
+.edit-row.in-superset {
+  border-left: 3px solid var(--accent);
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
+}
+.link-row {
+  display: flex; justify-content: center;
+  margin: -2px 0 8px;
+}
+.link-btn {
+  font-size: 12px; font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-line);
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.link-btn.ghost {
+  border-style: dashed;
+  border-color: var(--line);
+  background: transparent;
+  color: var(--text-faint);
+  font-weight: 600;
+}
+
+/* ---------- Superset block (during workout) ---------- */
+.superset {
+  border: 1px solid var(--accent-line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-dim);
+  padding: 8px;
+  margin-bottom: 16px;
+}
+.superset .exercise { margin-bottom: 8px; }
+.superset .exercise:last-child { margin-bottom: 0; }
+.superset-hd {
+  font-size: 12px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .06em;
+  color: var(--accent);
+  padding: 2px 4px 8px;
+}
+
 /* ---------- Exercise library picker ---------- */
 .lib-search {
   width: 100%; height: 48px;
