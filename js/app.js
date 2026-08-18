@@ -708,6 +708,10 @@ function renderWorkout() {
   };
 
   // Render exercises, wrapping consecutive same-group ones in a superset block.
+  // Between adjacent exercises show a link/unlink connector so supersets can be
+  // formed or broken mid-session (this workout only).
+  const linkConnector = (i) => `<div class="link-row"><button class="link-btn ghost" data-wklink="${i}">+ Link as superset</button></div>`;
+  const unlinkConnector = (i) => `<div class="link-row linked"><button class="link-btn" data-wkunlink="${i}">⛓ tap to unlink</button></div>`;
   let exBlocks = '';
   for (let bi = 0; bi < active.exercises.length;) {
     const g = active.exercises[bi].group;
@@ -715,14 +719,20 @@ function renderWorkout() {
     let bj = bi;
     while (g && bj < active.exercises.length && active.exercises[bj].group === g) { run.push(bj); bj++; }
     if (run.length >= 2) {
-      exBlocks += `<div class="superset"><div class="superset-hd">⛓ Superset · no rest between</div>`
-        + run.map((ei) => exCardHtml(active.exercises[ei], ei)).join('')
-        + `</div>`;
+      let inner = '';
+      run.forEach((ei, idx) => {
+        inner += exCardHtml(active.exercises[ei], ei);
+        if (idx < run.length - 1) inner += unlinkConnector(ei);
+      });
+      exBlocks += `<div class="superset"><div class="superset-hd">⛓ Superset · no rest between</div>${inner}</div>`;
       bi = bj;
     } else {
       exBlocks += exCardHtml(active.exercises[bi], bi);
       bi += 1;
     }
+    // Connector to the next top-level item (always a "link" — same-group runs
+    // are already captured inside a block above).
+    if (bi < active.exercises.length) exBlocks += linkConnector(bi - 1);
   }
 
   document.getElementById('app').innerHTML = `
@@ -840,6 +850,12 @@ function wireWorkout() {
     b.addEventListener('click', () => moveActiveEx(num(b.dataset.upex), -1)));
   document.querySelectorAll('[data-downex]').forEach((b) =>
     b.addEventListener('click', () => moveActiveEx(num(b.dataset.downex), +1)));
+
+  // link / unlink supersets mid-session
+  document.querySelectorAll('[data-wklink]').forEach((b) =>
+    b.addEventListener('click', () => linkActiveEx(num(b.dataset.wklink))));
+  document.querySelectorAll('[data-wkunlink]').forEach((b) =>
+    b.addEventListener('click', () => unlinkActiveEx(num(b.dataset.wkunlink))));
 
   // swap / remove an exercise (this session only)
   document.querySelectorAll('[data-swapex]').forEach((b) =>
@@ -1036,9 +1052,9 @@ function normalizeGroups(arr) {
   }
 }
 
-// Merge the runs on either side of the i / i+1 boundary into one superset.
-function linkPlanEx(dayId, i) {
-  const arr = userPlan.days[dayId].exercises;
+// Mutate `arr`: merge the runs on either side of the i / i+1 boundary into one
+// superset. Shared by the plan editor and the in-session workout.
+function groupLink(arr, i) {
   if (i < 0 || i + 1 >= arr.length) return;
   const ga = arr[i].group;
   const gb = arr[i + 1].group;
@@ -1048,24 +1064,25 @@ function linkPlanEx(dayId, i) {
   if (gb) { for (let k = i + 1; k < arr.length && arr[k].group === gb; k += 1) arr[k].group = id; }
   else arr[i + 1].group = id;
   normalizeGroups(arr);
-  savePlan();
-  renderDayEditor(dayId);
-  toast('⛓ Linked as superset');
 }
 
-// Break the superset at the i / i+1 boundary.
-function unlinkPlanEx(dayId, i) {
-  const arr = userPlan.days[dayId].exercises;
+// Mutate `arr`: break the superset at the i / i+1 boundary.
+function groupUnlink(arr, i) {
   if (i < 0 || i + 1 >= arr.length) return;
   const g = arr[i].group;
   if (!g || arr[i + 1].group !== g) return;
   const nid = 'g' + Date.now().toString(36);
   for (let k = i + 1; k < arr.length && arr[k].group === g; k += 1) arr[k].group = nid;
   normalizeGroups(arr);
-  savePlan();
-  renderDayEditor(dayId);
-  toast('Unlinked');
 }
+
+// Plan editor wrappers — persist the plan and re-render the day.
+function linkPlanEx(dayId, i) { groupLink(userPlan.days[dayId].exercises, i); savePlan(); renderDayEditor(dayId); toast('⛓ Linked as superset'); }
+function unlinkPlanEx(dayId, i) { groupUnlink(userPlan.days[dayId].exercises, i); savePlan(); renderDayEditor(dayId); toast('Unlinked'); }
+
+// In-session wrappers — this workout only, persist active and re-render.
+function linkActiveEx(i) { groupLink(active.exercises, i); save(KEY.active, active); renderWorkout(); toast('⛓ Linked — no rest between'); }
+function unlinkActiveEx(i) { groupUnlink(active.exercises, i); save(KEY.active, active); renderWorkout(); toast('Unlinked'); }
 
 // Reorder an exercise within the current workout (session order only).
 function moveActiveEx(ei, dir) {
@@ -1260,7 +1277,7 @@ function renderDayEditor(dayId) {
       <label class="fld"><span>Subtitle (optional)</span><input id="d-sub" type="text" value="${escapeHtml(d.subtitle || '')}" placeholder="e.g. Chest, back, arms" /></label>
     </div>
     <div class="section-title">Exercises</div>
-    <p class="muted" style="font-size:12px;margin:-4px 0 10px">Tap <b>Link as superset</b> between two moves to pair them — you'll do them back-to-back with no rest, and the timer only starts after the last one.</p>
+    <p class="muted" style="font-size:12px;margin:-4px 0 10px">Tap <b>Link as superset</b> between two moves to pair them — you'll do them back-to-back with no rest, and the timer only starts after the last one. You can also link/unlink on the fly during a workout.</p>
     ${rows || '<div class="empty">No exercises yet. Add one below.</div>'}
     <button class="btn btn-block mt16" data-addlib>+ Add from library</button>
     <button class="btn btn-ghost btn-block mt8" data-addex>+ Add custom exercise</button>
@@ -1953,7 +1970,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v14 · data stored on this device</p>`;
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v15 · data stored on this device</p>`;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
   $('#set-profiles').addEventListener('click', renderProfiles);

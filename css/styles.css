@@ -300,6 +300,9 @@ input, select { font-family: inherit; }
   color: var(--accent);
   padding: 2px 4px 8px;
 }
+/* connectors sitting inside the tinted block need a contrasting fill */
+.superset .link-row { margin: 8px 0; }
+.superset .link-btn { background: var(--bg-elev); }
 
 /* ---------- Exercise library picker ---------- */
 .lib-search {
