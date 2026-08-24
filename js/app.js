@@ -301,7 +301,26 @@ function progressionFor(name) {
     ? exBestReps(r.ex) >= top && exLoad(r.ex, 'weight') > 0
     : exLoad(r.ex, track) >= top);
 
+  // Felt-effort signal for a session's exercise entry (from the per-set tags):
+  //  pain  -> any completed set flagged discomfort
+  //  easy  -> a completed set flagged easy (and none flagged pain)
+  const feelOf = (r) => {
+    const done = r.ex.sets.filter((s) => s.done);
+    if (done.some((s) => s.feel === 'pain')) return 'pain';
+    if (done.some((s) => s.feel === 'easy')) return 'easy';
+    return done.some((s) => s.feel === 'ok') ? 'ok' : '';
+  };
+
   const newest = sessions[0];
+
+  // Pain last time holds progression back — never nudge heavier onto a joint
+  // the lifter just flagged. Surfaced as a caution, not a progress prompt.
+  if (feelOf(newest) === 'pain') {
+    return { name, track, hold: true,
+      label: 'Hold — you flagged discomfort',
+      detail: `You marked pain on this last session. Keep the load the same (or ease off) until it feels clean — don't add weight yet.` };
+  }
+
   if (!metTarget(newest)) return null;
   const current = exLoad(newest.ex, track);
   if (current <= 0) return null;
@@ -314,24 +333,31 @@ function progressionFor(name) {
   }
   const daysHeld = Math.round((Date.now() - oldestDate) / 864e5);
 
-  // Ready when it's been ~2 weeks, or 2+ solid sessions at this load.
-  if (!(streak >= 2 || daysHeld >= 14)) return null;
+  // Ready when it's been ~2 weeks, or 2+ solid sessions at this load —
+  // OR just one session that hit the top of the range AND felt easy.
+  const easyNow = feelOf(newest) === 'easy';
+  if (!(streak >= 2 || daysHeld >= 14 || easyNow)) return null;
+  const easyNote = easyNow && streak < 2 && daysHeld < 14;
 
   if (track === 'weight') {
     const next = +(current + weightStep()).toFixed(2);
     return { name, track, current, next,
       label: `Try ${next} ${settings.unit}`,
-      detail: `Held ${current} ${settings.unit} for ${streak} session${streak > 1 ? 's' : ''} — add ${weightStep()} ${settings.unit} or a rep.` };
+      detail: easyNote
+        ? `Felt easy at ${current} ${settings.unit} and you hit the top of the range — ready to add ${weightStep()} ${settings.unit}.`
+        : `Held ${current} ${settings.unit} for ${streak} session${streak > 1 ? 's' : ''} — add ${weightStep()} ${settings.unit} or a rep.` };
   }
   const isTime = track === 'time';
   const next = current + (isTime ? 5 : 1);
   return { name, track, current, next,
     label: `Try ${next}${isTime ? 's' : ' reps'}`,
-    detail: `Hit ${current}${isTime ? 's' : ' reps'} for ${streak} session${streak > 1 ? 's' : ''} — add ${isTime ? '5 seconds' : 'a rep'}.` };
+    detail: easyNote
+      ? `Felt easy at ${current}${isTime ? 's' : ' reps'} — ready to add ${isTime ? '5 seconds' : 'a rep'}.`
+      : `Hit ${current}${isTime ? 's' : ' reps'} for ${streak} session${streak > 1 ? 's' : ''} — add ${isTime ? '5 seconds' : 'a rep'}.` };
 }
 
 function allProgressions() {
-  return allExNames().map(progressionFor).filter(Boolean);
+  return allExNames().map(progressionFor).filter((p) => p && !p.hold);
 }
 
 /* ------------------------------------------------------------------ *
@@ -660,9 +686,11 @@ function renderWorkout() {
     const prev = last[ex.name];
 
     const prog = progressionFor(ex.name);
-    const progHint = prog ? (prog.track === 'weight'
-      ? `<button class="prog-hint" data-applyprog="${ei}" data-progval="${prog.next}">⬆ Ready to progress — tap to load <b>${prog.next} ${settings.unit}</b></button>`
-      : `<div class="prog-hint static">⬆ Ready to progress — aim for <b>${escapeHtml(prog.label.replace('Try ', ''))}</b></div>`) : '';
+    const progHint = prog ? (prog.hold
+      ? `<div class="prog-hint hold">⚠ ${escapeHtml(prog.detail)}</div>`
+      : (prog.track === 'weight'
+        ? `<button class="prog-hint" data-applyprog="${ei}" data-progval="${prog.next}">⬆ Ready to progress — tap to load <b>${prog.next} ${settings.unit}</b></button>`
+        : `<div class="prog-hint static">⬆ Ready to progress — aim for <b>${escapeHtml(prog.label.replace('Try ', ''))}</b></div>`)) : '';
 
     const rows = ex.sets.map((set, si) => `
       <div class="set-row ${set.done ? 'done' : ''}" data-ex="${ei}" data-set="${si}">
@@ -679,6 +707,12 @@ function renderWorkout() {
         </div>
         <button class="set-check ${set.done ? 'on' : ''}" data-check aria-label="Complete set ${si + 1}">✓</button>
         <button class="set-del" data-delset aria-label="Delete set ${si + 1}">✕</button>
+      </div>
+      <div class="feel ${set.done ? 'shown' : ''}" data-ex="${ei}" data-set="${si}">
+        <span class="feel-lbl">Felt</span>
+        <button class="feel-btn ${set.feel === 'easy' ? 'on' : ''}" data-feel="easy" aria-label="Felt easy">🟢 Easy</button>
+        <button class="feel-btn ${set.feel === 'ok' ? 'on' : ''}" data-feel="ok" aria-label="Just right">🔵 Just right</button>
+        <button class="feel-btn ${set.feel === 'pain' ? 'on' : ''}" data-feel="pain" aria-label="Hard or pain">🔴 Hard / pain</button>
       </div>`).join('');
 
     return `
@@ -834,6 +868,18 @@ function wireWorkout() {
   document.querySelectorAll('[data-check]').forEach((b) =>
     b.addEventListener('click', onCheck));
 
+  // per-set "how did it feel?" tags (tap again to clear)
+  document.querySelectorAll('.feel-btn').forEach((b) =>
+    b.addEventListener('click', (e) => {
+      const wrap = e.target.closest('.feel');
+      const ei = num(wrap.dataset.ex), si = num(wrap.dataset.set);
+      const val = e.target.dataset.feel;
+      const set = active.exercises[ei].sets[si];
+      set.feel = (set.feel === val ? '' : val);
+      save(KEY.active, active);
+      wrap.querySelectorAll('.feel-btn').forEach((x) => x.classList.toggle('on', x.dataset.feel === set.feel));
+    }));
+
   // add set
   document.querySelectorAll('[data-addset]').forEach((b) =>
     b.addEventListener('click', () => addSet(num(b.dataset.addset))));
@@ -935,6 +981,10 @@ function onCheck(e) {
     e.target.classList.remove('on');
     save(KEY.active, active);
   }
+
+  // reveal the "how did it feel?" tags once the set is marked done
+  const feelEl = row.nextElementSibling;
+  if (feelEl && feelEl.classList.contains('feel')) feelEl.classList.toggle('shown', set.done);
 
   // mark exercise done-all styling
   const exEl = row.closest('.exercise');
@@ -1970,7 +2020,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v15 · data stored on this device</p>`;
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v16 · data stored on this device</p>`;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
   $('#set-profiles').addEventListener('click', renderProfiles);
