@@ -23,7 +23,7 @@ screen (it's a PWA). No accounts, no server — your data lives on your device.
 - **Customize exercises** — from the home screen, edit any day: add exercises, edit sets/reps/notes/type, reorder them, delete, or reset a day to the default plan. Changes stick for future workouts.
 - **Exercise library** — an 80-strong, preloaded, searchable catalogue (Legs, Chest, Back, Shoulders, Arms, Core, Cardio) to add from with one tap; it pre-fills sensible sets/reps/type/notes. Bundled in the app, so it works offline. It's *joint-aware*: movements that load the knee or shoulder are flagged ⚠ with a caution, rather than dumping a generic list full of the exercises this plan avoids.
 - **Edit past workouts** — tap any recent session to fix a logged weight or rep, toggle whether a set counts, or delete the session. Volume and stats update automatically.
-- **Rotating warm-ups** — a pool of five joint-friendly warm-ups; you get a different one each session, cycling back to the first at the start of each week.
+- **Warm-up & cool-down routines with timers** — each training day has its own editable **Warm-up** (before) and **Cool-down / stretch** (after) routine. Every move has a name and a duration in seconds (e.g. 30s), and during the workout each move shows a **▶ timer** you tap to run its countdown (with the same beeps as the rest timer). Edit them per day in the day editor — add, rename, reorder, delete moves and set each one's seconds. Seeded with sensible joint-friendly defaults so they're ready out of the box.
 - **Offline-first PWA** — add to home screen; it runs with no signal in the gym.
 - **Your data, exportable** — everything is stored locally; export to JSON from Settings.
 
@@ -76,7 +76,8 @@ Ideas (not scheduled):
 Recently shipped: light redesign · multi-profile · smart injury-aware cautions ·
 1–7 custom training days (add/rename/remove) · exercise library · hydration
 reminders · workout timer/clock · how-to links · mid-workout add/swap/reorder ·
-supersets (grouping + smart rest) · per-set effort tags (feel-aware progression).
+supersets (grouping + smart rest) · per-set effort tags (feel-aware progression) ·
+per-day warm-up & cool-down routines with per-move timers.
 
 ---
 

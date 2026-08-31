@@ -529,6 +529,43 @@ input, select { font-family: inherit; }
 .warmup ol { margin: 0; padding: 0 18px 14px 34px; color: #8a6318; font-size: 14px; }
 .warmup li { margin: 5px 0; }
 
+/* warm-up / stretch routine — timed moves in the workout */
+.rt-list { list-style: none; margin: 0; padding: 4px 14px 14px; }
+.rt-move { display: flex; align-items: center; gap: 10px; padding: 5px 0; }
+.rt-move-name { font-size: 14px; color: #7a4d08; font-weight: 600; }
+.rt-go {
+  flex: 0 0 auto;
+  font-size: 13px; font-weight: 700;
+  padding: 6px 11px; border-radius: 999px;
+  border: 1px solid var(--warn-line);
+  background: #fff; color: var(--warn);
+  white-space: nowrap;
+}
+.warmup.routine { background: var(--warn-tint); }
+
+/* warm-up / stretch move editor rows (in the day editor) */
+.rt-edit {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 8px 8px 8px 10px;
+  margin-bottom: 8px;
+}
+.rt-name-inp {
+  flex: 1; min-width: 0;
+  height: 38px; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: 9px;
+  background: var(--bg-elev-2); color: var(--text); font-size: 14px;
+}
+.rt-name-inp:focus, .rt-secs-inp:focus { outline: none; border-color: var(--accent); }
+.rt-secs-wrap { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; color: var(--text-dim); font-size: 13px; }
+.rt-secs-inp {
+  width: 52px; height: 38px; text-align: center;
+  border: 1px solid var(--line); border-radius: 9px;
+  background: var(--bg-elev-2); color: var(--text); font-size: 14px;
+}
+
 /* exercise block */
 .exercise {
   background: var(--bg-elev);

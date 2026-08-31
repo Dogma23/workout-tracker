@@ -78,7 +78,20 @@ function loadProfileState() {
   active = load(KEY.active, null);
   userPlan = load(KEY.plan, null);
   if (!userPlan) { userPlan = seedPlan(); save(KEY.plan, userPlan); }
+  if (ensureRoutines()) savePlan();   // seed warm-up / stretch onto older plans
   chartEx = null;
+}
+
+// Give every day a warm-up and a stretch routine if it doesn't have one yet
+// (migrates plans saved before per-day routines existed). Returns true if it
+// changed anything, so the caller can persist.
+function ensureRoutines() {
+  let changed = false;
+  Object.values(userPlan.days).forEach((d) => {
+    if (!Array.isArray(d.warmup)) { d.warmup = JSON.parse(JSON.stringify(DEFAULT_WARMUP)); changed = true; }
+    if (!Array.isArray(d.stretch)) { d.stretch = JSON.parse(JSON.stringify(DEFAULT_STRETCH)); changed = true; }
+  });
+  return changed;
 }
 loadProfileState();
 
@@ -637,7 +650,8 @@ function startWorkout(dayId) {
     dayName: day.name,
     startedAt: Date.now(),
     rest: settings.rest,
-    warmupIndex: nextWarmupIndex(),
+    warmup: JSON.parse(JSON.stringify(day.warmup || [])),
+    stretch: JSON.parse(JSON.stringify(day.stretch || [])),
     exercises: day.exercises.map((ex) => ({
       name: ex.name,
       target: `${ex.sets} × ${ex.reps}`,
@@ -671,12 +685,24 @@ function renderWorkout() {
     `<button class="chip ${active.rest === n ? 'active' : ''}" data-rest="${n}">${n}s</button>`
   ).join('') + `<button class="chip ${!REST_PRESETS.includes(active.rest) && active.rest ? 'active' : ''}" data-rest-custom>${!REST_PRESETS.includes(active.rest) ? active.rest + 's' : '···'}</button>`;
 
-  const wu = WARMUPS[active.warmupIndex] || WARMUPS[0];
-  const warmup = `
-    <details class="warmup">
-      <summary><span class="wu-i">▲</span> Warm-up · ${escapeHtml(wu.name)} · 5 min <span style="margin-left:auto;color:var(--text-faint);font-size:12px;font-weight:500">tap to expand</span></summary>
-      <ol>${wu.steps.map((w) => `<li>${escapeHtml(w)}</li>`).join('')}</ol>
-    </details>`;
+  // Warm-up / stretch routines: a collapsible section with a timer on each move.
+  const routineSection = (kind, label, icon) => {
+    const moves = active[kind] || [];
+    if (!moves.length) return '';
+    const total = moves.reduce((n, m) => n + (Number(m.secs) || 0), 0);
+    const items = moves.map((m, i) => `
+      <li class="rt-move">
+        <button class="rt-go" data-routine="${kind}" data-i="${i}" data-secs="${Number(m.secs) || 30}">▶ ${Number(m.secs) || 30}s</button>
+        <span class="rt-move-name">${escapeHtml(m.name || 'Move')}</span>
+      </li>`).join('');
+    return `
+      <details class="warmup routine">
+        <summary><span class="wu-i">▲</span> ${icon} ${label} · ${moves.length} moves · ${fmtElapsed(total)} <span style="margin-left:auto;color:var(--text-faint);font-size:12px;font-weight:500">tap to expand</span></summary>
+        <ul class="rt-list">${items}</ul>
+      </details>`;
+  };
+  const warmup = routineSection('warmup', 'Warm-up', '🔥');
+  const cooldown = routineSection('stretch', 'Cool-down / stretch', '🧘');
 
   const exCardHtml = (ex, ei) => {
     const allDone = ex.sets.every((s) => s.done);
@@ -789,6 +815,8 @@ function renderWorkout() {
 
     <button class="btn btn-ghost btn-block" data-addexercise>+ Add exercise</button>
 
+    ${cooldown}
+
     <div class="finish-bar">
       <button class="btn btn-ghost" data-discard style="flex:0 0 auto">Discard</button>
       <button class="btn btn-block btn-lg" data-finish>Finish workout</button>
@@ -863,6 +891,10 @@ function wireWorkout() {
     inp.addEventListener('input', onFieldInput);
     inp.addEventListener('blur', () => save(KEY.active, active));
   });
+
+  // warm-up / stretch move timers — tap ▶ to run that move's countdown
+  document.querySelectorAll('[data-routine]').forEach((b) =>
+    b.addEventListener('click', () => { unlockAudio(); startTimer(num(b.dataset.secs)); }));
 
   // check buttons
   document.querySelectorAll('[data-check]').forEach((b) =>
@@ -1261,7 +1293,9 @@ function renderPlanPicker() {
 function addDay() {
   if (userPlan.order.length >= 7) { toast('7 days is the max'); return; }
   const id = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-  userPlan.days[id] = { id, name: 'New day', day: '', subtitle: '', exercises: [] };
+  userPlan.days[id] = { id, name: 'New day', day: '', subtitle: '', exercises: [],
+    warmup: JSON.parse(JSON.stringify(DEFAULT_WARMUP)),
+    stretch: JSON.parse(JSON.stringify(DEFAULT_STRETCH)) };
   userPlan.order.push(id);
   savePlan();
   renderDayEditor(id);
@@ -1314,6 +1348,24 @@ function renderDayEditor(dayId) {
   });
   const rows = parts.join('');
 
+  // Warm-up / stretch routine editors — each move has a name and a duration.
+  const routineEditor = (kind, label, hint) => {
+    const moves = d[kind] || [];
+    const mrows = moves.map((m, i) => `
+      <div class="rt-edit" data-kind="${kind}" data-i="${i}">
+        <input class="rt-name-inp" type="text" value="${escapeHtml(m.name || '')}" placeholder="Move name" data-rt="name" aria-label="Move name" />
+        <div class="rt-secs-wrap"><input class="rt-secs-inp" type="number" inputmode="numeric" min="5" step="5" value="${Number(m.secs) || 30}" data-rt="secs" aria-label="Seconds" /><span>s</span></div>
+        <button class="mini-btn" data-rtact="up" ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
+        <button class="mini-btn" data-rtact="down" ${i === moves.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button>
+        <button class="mini-btn danger" data-rtact="del" aria-label="Delete">✕</button>
+      </div>`).join('');
+    return `
+      <div class="section-title mt24">${label}</div>
+      <p class="muted" style="font-size:12px;margin:-4px 0 10px">${hint}</p>
+      ${mrows || '<div class="empty">No moves yet — add one below.</div>'}
+      <button class="btn btn-ghost btn-block mt8" data-rtadd="${kind}">+ Add move</button>`;
+  };
+
   document.getElementById('app').innerHTML = `
     <header class="app-header">
       <button class="icon-btn" data-back aria-label="Back">‹</button>
@@ -1331,7 +1383,9 @@ function renderDayEditor(dayId) {
     ${rows || '<div class="empty">No exercises yet. Add one below.</div>'}
     <button class="btn btn-block mt16" data-addlib>+ Add from library</button>
     <button class="btn btn-ghost btn-block mt8" data-addex>+ Add custom exercise</button>
-    ${PLAN[dayId] ? '<button class="btn btn-ghost btn-block mt8" data-resetday>Reset this day to default</button>' : ''}
+    ${routineEditor('warmup', '🔥 Warm-up', 'Runs before the workout. Tap ▶ on a move during the session to run its timer.')}
+    ${routineEditor('stretch', '🧘 Cool-down / stretch', 'Runs after the workout — pre/post stretches and mobility, each on its own timer.')}
+    ${PLAN[dayId] ? '<button class="btn btn-ghost btn-block mt24" data-resetday>Reset this day to default</button>' : ''}
     ${userPlan.order.length > 1 ? '<button class="btn btn-ghost btn-block mt8" data-delday>Remove this day</button>' : ''}
     <p class="center muted mt16" style="font-size:12px">Changes apply to your next workout, not one in progress.</p>
   `;
@@ -1346,9 +1400,31 @@ function renderDayEditor(dayId) {
   document.querySelectorAll('[data-link]').forEach((b) => b.addEventListener('click', () => linkPlanEx(dayId, +b.dataset.link)));
   document.querySelectorAll('[data-unlink]').forEach((b) => b.addEventListener('click', () => unlinkPlanEx(dayId, +b.dataset.unlink)));
   $('[data-addex]').addEventListener('click', () => { renameDay(dayId); renderExerciseForm(dayId, null); });
+
+  // warm-up / stretch move edits
+  document.querySelectorAll('.rt-edit [data-rt]').forEach((inp) =>
+    inp.addEventListener('input', (e) => {
+      const row = e.target.closest('.rt-edit');
+      const arr = userPlan.days[dayId][row.dataset.kind], i = +row.dataset.i;
+      if (e.target.dataset.rt === 'secs') arr[i].secs = num(e.target.value);
+      else arr[i].name = e.target.value;
+      savePlan();
+    }));
+  document.querySelectorAll('.rt-edit [data-rtact]').forEach((b) =>
+    b.addEventListener('click', (e) => {
+      const row = e.target.closest('.rt-edit');
+      routineAction(dayId, row.dataset.kind, +row.dataset.i, b.dataset.rtact);
+    }));
+  document.querySelectorAll('[data-rtadd]').forEach((b) =>
+    b.addEventListener('click', () => {
+      userPlan.days[dayId][b.dataset.rtadd].push({ name: '', secs: 30 });
+      savePlan(); renderDayEditor(dayId);
+    }));
+
   const rd = $('[data-resetday]');
   if (rd) rd.addEventListener('click', (e) => armThen(e.target, 'Tap again to reset', () => {
     if (PLAN[dayId]) userPlan.days[dayId] = JSON.parse(JSON.stringify(PLAN[dayId]));
+    ensureRoutines();   // PLAN defaults have no routines — re-seed them
     savePlan(); renderDayEditor(dayId); toast('Reset to default');
   }));
   const dd = $('[data-delday]');
@@ -1361,6 +1437,18 @@ function moveEx(dayId, i, dir) {
   if (j < 0 || j >= arr.length) return;
   [arr[i], arr[j]] = [arr[j], arr[i]];
   normalizeGroups(arr);
+  savePlan();
+  renderDayEditor(dayId);
+}
+
+// Reorder / delete a warm-up or stretch move.
+function routineAction(dayId, kind, i, act) {
+  const arr = userPlan.days[dayId][kind];
+  if (!arr) return;
+  if (act === 'del') { arr.splice(i, 1); savePlan(); renderDayEditor(dayId); return; }
+  const j = act === 'up' ? i - 1 : i + 1;
+  if (j < 0 || j >= arr.length) return;
+  [arr[i], arr[j]] = [arr[j], arr[i]];
   savePlan();
   renderDayEditor(dayId);
 }
@@ -2020,7 +2108,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v16 · data stored on this device</p>`;
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v17 · data stored on this device</p>`;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
   $('#set-profiles').addEventListener('click', renderProfiles);

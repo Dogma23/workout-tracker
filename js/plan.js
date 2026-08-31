@@ -45,6 +45,24 @@ const WARMUPS = [
   ] },
 ];
 
+// Default per-day routines (seeded onto each day; fully editable per day in the
+// app). Each move has a name and a duration in seconds. Warm-up runs before the
+// session, the stretch / cool-down after it.
+const DEFAULT_WARMUP = [
+  { name: 'Marching on the spot', secs: 60 },
+  { name: 'Arm circles, small to large', secs: 60 },
+  { name: 'Bodyweight glute bridges', secs: 60 },
+  { name: 'Cat-cow (spine mobility)', secs: 60 },
+  { name: 'Shoulder blade squeezes', secs: 60 },
+];
+const DEFAULT_STRETCH = [
+  { name: 'Chest doorway stretch', secs: 30 },
+  { name: 'Hamstring stretch — each side', secs: 30 },
+  { name: 'Figure-4 glute stretch — each side', secs: 30 },
+  { name: "Child's pose", secs: 30 },
+  { name: 'Neck side stretch — each side', secs: 30 },
+];
+
 /* Each day has an id, a name, a short subtitle and a list of exercises.
    Exercise fields:
      name     — what shows in the tracker
