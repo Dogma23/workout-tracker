@@ -542,6 +542,22 @@ input, select { font-family: inherit; }
   white-space: nowrap;
 }
 .warmup.routine { background: var(--warn-tint); }
+.rt-when { font-weight: 500; opacity: .7; font-size: 12px; }
+
+/* pre/post segment type chips (Warm-up / Stretch / Cardio / None) */
+.seg-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.seg-chip {
+  font-size: 13px; font-weight: 600;
+  padding: 7px 12px; border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg-elev); color: var(--text-dim);
+}
+.seg-chip.on {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
 
 /* warm-up / stretch move editor rows (in the day editor) */
 .rt-edit {

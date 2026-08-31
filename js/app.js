@@ -82,14 +82,29 @@ function loadProfileState() {
   chartEx = null;
 }
 
-// Give every day a warm-up and a stretch routine if it doesn't have one yet
-// (migrates plans saved before per-day routines existed). Returns true if it
-// changed anything, so the caller can persist.
+// Segment types the PT can choose for the pre- and post-workout slots.
+const SEGMENT_META = {
+  warmup:  { label: 'Warm-up', icon: '🔥' },
+  stretch: { label: 'Stretch', icon: '🧘' },
+  cardio:  { label: 'Cardio', icon: '🏃' },
+  off:     { label: 'None', icon: '⊘' },
+};
+const SEGMENT_ORDER = ['warmup', 'stretch', 'cardio', 'off'];
+const segDefaults = (type) => JSON.parse(JSON.stringify(
+  type === 'stretch' ? DEFAULT_STRETCH : type === 'cardio' ? DEFAULT_CARDIO : DEFAULT_WARMUP));
+
+// Give every day its pre-workout (`warmup` list + `preType`) and post-workout
+// (`stretch` list + `postType`) segments if missing. Migrates plans saved before
+// these existed. The array keys stay `warmup`/`stretch` (the pre/post move lists);
+// `preType`/`postType` say what kind of segment each one is. Returns true if
+// anything changed, so the caller can persist.
 function ensureRoutines() {
   let changed = false;
   Object.values(userPlan.days).forEach((d) => {
     if (!Array.isArray(d.warmup)) { d.warmup = JSON.parse(JSON.stringify(DEFAULT_WARMUP)); changed = true; }
     if (!Array.isArray(d.stretch)) { d.stretch = JSON.parse(JSON.stringify(DEFAULT_STRETCH)); changed = true; }
+    if (!d.preType) { d.preType = 'warmup'; changed = true; }
+    if (!d.postType) { d.postType = 'stretch'; changed = true; }
   });
   return changed;
 }
@@ -652,6 +667,8 @@ function startWorkout(dayId) {
     rest: settings.rest,
     warmup: JSON.parse(JSON.stringify(day.warmup || [])),
     stretch: JSON.parse(JSON.stringify(day.stretch || [])),
+    preType: day.preType || 'warmup',
+    postType: day.postType || 'stretch',
     exercises: day.exercises.map((ex) => ({
       name: ex.name,
       target: `${ex.sets} × ${ex.reps}`,
@@ -685,10 +702,13 @@ function renderWorkout() {
     `<button class="chip ${active.rest === n ? 'active' : ''}" data-rest="${n}">${n}s</button>`
   ).join('') + `<button class="chip ${!REST_PRESETS.includes(active.rest) && active.rest ? 'active' : ''}" data-rest-custom>${!REST_PRESETS.includes(active.rest) ? active.rest + 's' : '···'}</button>`;
 
-  // Warm-up / stretch routines: a collapsible section with a timer on each move.
-  const routineSection = (kind, label, icon) => {
+  // Pre / post workout segment: a collapsible section with a timer on each move.
+  // The heading reflects the chosen type (warm-up / stretch / cardio); 'off' or
+  // an empty list renders nothing.
+  const routineSection = (kind, type, when) => {
+    const meta = SEGMENT_META[type] || SEGMENT_META.warmup;
     const moves = active[kind] || [];
-    if (!moves.length) return '';
+    if (type === 'off' || !moves.length) return '';
     const total = moves.reduce((n, m) => n + (Number(m.secs) || 0), 0);
     const items = moves.map((m, i) => `
       <li class="rt-move">
@@ -697,12 +717,12 @@ function renderWorkout() {
       </li>`).join('');
     return `
       <details class="warmup routine">
-        <summary><span class="wu-i">▲</span> ${icon} ${label} · ${moves.length} moves · ${fmtElapsed(total)} <span style="margin-left:auto;color:var(--text-faint);font-size:12px;font-weight:500">tap to expand</span></summary>
+        <summary><span class="wu-i">▲</span> ${meta.icon} ${meta.label} <span class="rt-when">${when}</span> · ${moves.length} ${moves.length === 1 ? 'move' : 'moves'} · ${fmtElapsed(total)} <span style="margin-left:auto;color:var(--text-faint);font-size:12px;font-weight:500">tap to expand</span></summary>
         <ul class="rt-list">${items}</ul>
       </details>`;
   };
-  const warmup = routineSection('warmup', 'Warm-up', '🔥');
-  const cooldown = routineSection('stretch', 'Cool-down / stretch', '🧘');
+  const warmup = routineSection('warmup', active.preType || 'warmup', 'before');
+  const cooldown = routineSection('stretch', active.postType || 'stretch', 'after');
 
   const exCardHtml = (ex, ei) => {
     const allDone = ex.sets.every((s) => s.done);
@@ -1294,8 +1314,8 @@ function addDay() {
   if (userPlan.order.length >= 7) { toast('7 days is the max'); return; }
   const id = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
   userPlan.days[id] = { id, name: 'New day', day: '', subtitle: '', exercises: [],
-    warmup: JSON.parse(JSON.stringify(DEFAULT_WARMUP)),
-    stretch: JSON.parse(JSON.stringify(DEFAULT_STRETCH)) };
+    warmup: JSON.parse(JSON.stringify(DEFAULT_WARMUP)), preType: 'warmup',
+    stretch: JSON.parse(JSON.stringify(DEFAULT_STRETCH)), postType: 'stretch' };
   userPlan.order.push(id);
   savePlan();
   renderDayEditor(id);
@@ -1348,8 +1368,13 @@ function renderDayEditor(dayId) {
   });
   const rows = parts.join('');
 
-  // Warm-up / stretch routine editors — each move has a name and a duration.
-  const routineEditor = (kind, label, hint) => {
+  // Pre / post workout segment editors. Each has a TYPE (warm-up / stretch /
+  // cardio / none) chosen via chips, plus an editable list of timed moves.
+  const routineEditor = (kind, typeKey, when) => {
+    const type = d[typeKey] || (kind === 'warmup' ? 'warmup' : 'stretch');
+    const chips = SEGMENT_ORDER.map((t) =>
+      `<button class="seg-chip ${t === type ? 'on' : ''}" data-segtype="${typeKey}" data-kind="${kind}" data-type="${t}">${SEGMENT_META[t].icon} ${SEGMENT_META[t].label}</button>`
+    ).join('');
     const moves = d[kind] || [];
     const mrows = moves.map((m, i) => `
       <div class="rt-edit" data-kind="${kind}" data-i="${i}">
@@ -1359,11 +1384,14 @@ function renderDayEditor(dayId) {
         <button class="mini-btn" data-rtact="down" ${i === moves.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button>
         <button class="mini-btn danger" data-rtact="del" aria-label="Delete">✕</button>
       </div>`).join('');
+    const body = type === 'off'
+      ? `<div class="empty">No ${when === 'before' ? 'pre' : 'post'}-workout segment. Pick a type above to add one.</div>`
+      : `${mrows || '<div class="empty">No moves yet — add one below.</div>'}
+         <button class="btn btn-ghost btn-block mt8" data-rtadd="${kind}">+ Add move</button>`;
     return `
-      <div class="section-title mt24">${label}</div>
-      <p class="muted" style="font-size:12px;margin:-4px 0 10px">${hint}</p>
-      ${mrows || '<div class="empty">No moves yet — add one below.</div>'}
-      <button class="btn btn-ghost btn-block mt8" data-rtadd="${kind}">+ Add move</button>`;
+      <div class="section-title mt24">${when === 'before' ? 'Pre-workout' : 'Post-workout'} <span class="muted" style="font-weight:500;text-transform:none;letter-spacing:0">· runs ${when}</span></div>
+      <div class="seg-chips">${chips}</div>
+      ${body}`;
   };
 
   document.getElementById('app').innerHTML = `
@@ -1383,8 +1411,8 @@ function renderDayEditor(dayId) {
     ${rows || '<div class="empty">No exercises yet. Add one below.</div>'}
     <button class="btn btn-block mt16" data-addlib>+ Add from library</button>
     <button class="btn btn-ghost btn-block mt8" data-addex>+ Add custom exercise</button>
-    ${routineEditor('warmup', '🔥 Warm-up', 'Runs before the workout. Tap ▶ on a move during the session to run its timer.')}
-    ${routineEditor('stretch', '🧘 Cool-down / stretch', 'Runs after the workout — pre/post stretches and mobility, each on its own timer.')}
+    ${routineEditor('warmup', 'preType', 'before')}
+    ${routineEditor('stretch', 'postType', 'after')}
     ${PLAN[dayId] ? '<button class="btn btn-ghost btn-block mt24" data-resetday>Reset this day to default</button>' : ''}
     ${userPlan.order.length > 1 ? '<button class="btn btn-ghost btn-block mt8" data-delday>Remove this day</button>' : ''}
     <p class="center muted mt16" style="font-size:12px">Changes apply to your next workout, not one in progress.</p>
@@ -1420,6 +1448,8 @@ function renderDayEditor(dayId) {
       userPlan.days[dayId][b.dataset.rtadd].push({ name: '', secs: 30 });
       savePlan(); renderDayEditor(dayId);
     }));
+  document.querySelectorAll('[data-segtype]').forEach((b) =>
+    b.addEventListener('click', () => setSegmentType(dayId, b.dataset.kind, b.dataset.segtype, b.dataset.type)));
 
   const rd = $('[data-resetday]');
   if (rd) rd.addEventListener('click', (e) => armThen(e.target, 'Tap again to reset', () => {
@@ -1439,6 +1469,23 @@ function moveEx(dayId, i, dir) {
   normalizeGroups(arr);
   savePlan();
   renderDayEditor(dayId);
+}
+
+// Change a segment's type (pre/post). When the current move list is empty or is
+// still the previous type's untouched defaults, load the new type's defaults —
+// so choosing a type "sets up" that segment — but never clobber a custom list.
+function setSegmentType(dayId, kind, typeKey, newType) {
+  const d = userPlan.days[dayId];
+  const prevType = d[typeKey];
+  if (prevType === newType) return;
+  const arr = d[kind] || [];
+  const untouched = arr.length === 0 || JSON.stringify(arr) === JSON.stringify(segDefaults(prevType));
+  d[typeKey] = newType;
+  if (newType !== 'off' && untouched) d[kind] = segDefaults(newType);
+  savePlan();
+  renderDayEditor(dayId);
+  const pos = kind === 'warmup' ? 'Pre-workout' : 'Post-workout';
+  toast(`${SEGMENT_META[newType].icon} ${newType === 'off' ? pos + ' off' : pos + ': ' + SEGMENT_META[newType].label}`);
 }
 
 // Reorder / delete a warm-up or stretch move.
@@ -2108,7 +2155,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v17 · data stored on this device</p>`;
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v18 · data stored on this device</p>`;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
   $('#set-profiles').addEventListener('click', renderProfiles);

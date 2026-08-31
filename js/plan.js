@@ -62,6 +62,12 @@ const DEFAULT_STRETCH = [
   { name: "Child's pose", secs: 30 },
   { name: 'Neck side stretch — each side', secs: 30 },
 ];
+// Low-impact cardio (joint-friendly — no jumping/running). One block by default;
+// edit or add intervals per day.
+const DEFAULT_CARDIO = [
+  { name: 'Treadmill walk / bike / rower — steady', secs: 300 },
+  { name: 'Easy pace, then a little faster', secs: 120 },
+];
 
 /* Each day has an id, a name, a short subtitle and a list of exercises.
    Exercise fields:
