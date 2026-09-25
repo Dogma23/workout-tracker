@@ -16,7 +16,15 @@ const load = (k, fallback) => {
 };
 const save = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 
-const DEFAULT_SETTINGS = { rest: 90, sound: true, vibrate: true, unit: 'kg', hydration: true, hydrationMin: 15 };
+const DEFAULT_SETTINGS = { rest: 90, sound: true, vibrate: true, unit: 'kg', hydration: true, hydrationMin: 15, theme: 'system', recordPain: true };
+
+// Apply the chosen theme by stamping the root element. 'system' removes the
+// stamp so the OS preference (prefers-color-scheme) decides.
+function applyTheme() {
+  const t = (settings && settings.theme) || 'system';
+  if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+  else delete document.documentElement.dataset.theme;
+}
 
 /* ------------------------------------------------------------------ *
  * Profiles — each person's data lives under keys namespaced by profile id
@@ -80,6 +88,7 @@ function loadProfileState() {
   if (!userPlan) { userPlan = seedPlan(); save(KEY.plan, userPlan); }
   if (ensureRoutines()) savePlan();   // seed warm-up / stretch onto older plans
   chartEx = null;
+  applyTheme();   // per-profile theme choice
 }
 
 // Segment types the PT can choose for the pre- and post-workout slots.
@@ -474,11 +483,65 @@ function svgLineChart(points) {
 /* ================================================================== *
  * VIEW: Home / Dashboard
  * ================================================================== */
+/* ------------------------------------------------------------------ *
+ * Bottom tab navigation shell (Home / Workout / History / You)
+ * ------------------------------------------------------------------ */
+const TAB_ICONS = {
+  home: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>',
+  workout: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/></svg>',
+  history: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>',
+  you: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6"/></svg>',
+};
+const TAB_LIST = [['home', 'Home'], ['workout', 'Workout'], ['history', 'History'], ['you', 'You']];
+function tabBar(active) {
+  return `<nav class="tabbar">${TAB_LIST.map(([id, label]) =>
+    `<button class="tab ${id === active ? 'on' : ''}" data-tab="${id}" aria-label="${label}">${TAB_ICONS[id]}<span>${label}</span></button>`).join('')}</nav>`;
+}
+function wireTabs() {
+  document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => goTab(b.dataset.tab)));
+}
+function goTab(tab) {
+  if (tab === 'workout') return active ? renderWorkout() : renderStartWorkout();
+  if (tab === 'history') return renderHistory();
+  if (tab === 'you') return renderYou();
+  return renderHome();
+}
+
+// Day cards ("choose a workout") — reused by Home resume + Workout tab.
+function dayCardsHtml() {
+  return userPlan.order.map((id) => {
+    const d = userPlan.days[id];
+    return `
+      <div class="day-card">
+        <button class="dc-hit" data-start="${id}">
+          <span class="badge">${escapeHtml(d.name[0])}</span>
+          <span class="dc-text">
+            <div class="dc-name">${escapeHtml(d.name)}</div>
+            <div class="dc-sub">${escapeHtml(d.subtitle || '')}</div>
+            <div class="dc-meta">${d.day ? escapeHtml(d.day) + ' · ' : ''}${d.exercises.length} exercise${d.exercises.length === 1 ? '' : 's'}</div>
+          </span>
+        </button>
+        <button class="dc-edit" data-editday="${id}" aria-label="Edit ${escapeHtml(d.name)}">✎</button>
+      </div>`;
+  }).join('');
+}
+function progCardHtml(p) {
+  return `
+      <div class="prog-card">
+        <div class="prog-i">⬆</div>
+        <div class="prog-main">
+          <div class="prog-name">${escapeHtml(p.name)}</div>
+          <div class="prog-detail">${escapeHtml(p.detail)}</div>
+        </div>
+        <div class="prog-next">${escapeHtml(p.label)}</div>
+      </div>`;
+}
+
+/* ================================================================== *
+ * TAB: Home — today's workout, quick stats, top progression
+ * ================================================================== */
 function renderHome() {
   const s = stats();
-  const bests = personalBests();
-  const bestNames = Object.keys(bests);
-
   const activeDay = active && userPlan.days[active.dayId];
   const resumeHtml = active ? `
     <div class="resume">
@@ -497,74 +560,10 @@ function renderHome() {
       <button class="btn btn-block btn-lg" data-start="${sug.id}">Start today's workout</button>
     </div>`;
 
-  const dayCards = userPlan.order.map((id) => {
-    const d = userPlan.days[id];
-    return `
-      <div class="day-card">
-        <button class="dc-hit" data-start="${id}">
-          <span class="badge">${escapeHtml(d.name[0])}</span>
-          <span class="dc-text">
-            <div class="dc-name">${escapeHtml(d.name)}</div>
-            <div class="dc-sub">${escapeHtml(d.subtitle || '')}</div>
-            <div class="dc-meta">${d.day ? escapeHtml(d.day) + ' · ' : ''}${d.exercises.length} exercise${d.exercises.length === 1 ? '' : 's'}</div>
-          </span>
-        </button>
-        <button class="dc-edit" data-editday="${id}" aria-label="Edit ${escapeHtml(d.name)}">✎</button>
-      </div>`;
-  }).join('');
-
-  const recent = history.slice(0, 5).map((h) => `
-    <button class="hist-item" data-editsession="${h.id}">
-      <div>
-        <div class="h-day">${escapeHtml(userPlan.days[h.dayId] ? userPlan.days[h.dayId].name : h.dayName || 'Workout')}</div>
-        <div class="h-date">${fmtDate(h.date)}${h.durationSec ? ' · ' + Math.round(h.durationSec / 60) + ' min' : ''}</div>
-      </div>
-      <div class="h-vol">
-        <div class="v">${fmtVol(h.volume != null ? h.volume : sessionVolume(h))} ${settings.unit}</div>
-        <div class="l">volume ›</div>
-      </div>
-    </button>`).join('');
-
-  const bestsHtml = bestNames.length ? bestNames.map((n) => `
-      <div class="pb-row">
-        <span class="pb-name">${escapeHtml(n)}</span>
-        <span class="pb-val">${bests[n].weight} <small>${settings.unit} × ${escapeHtml(String(bests[n].reps || '—'))}</small></span>
-      </div>`).join('') : '';
-
-  // Ready-to-progress cards
   const progs = allProgressions();
-  const progHtml = progs.length ? `
-    <div class="section-title">Ready to progress</div>
-    ${progs.map((p) => `
-      <div class="prog-card">
-        <div class="prog-i">⬆</div>
-        <div class="prog-main">
-          <div class="prog-name">${escapeHtml(p.name)}</div>
-          <div class="prog-detail">${escapeHtml(p.detail)}</div>
-        </div>
-        <div class="prog-next">${escapeHtml(p.label)}</div>
-      </div>`).join('')}` : '';
-
-  // Progress charts
-  const chartable = chartableExercises();
-  if (chartEx == null || !chartable.includes(chartEx)) chartEx = chartable[0] || null;
-  const volSeries = volumeSeries(10);
-  const chartsHtml = history.length ? `
-    <div class="section-title">Progress</div>
-    <div class="stat" style="padding:14px 14px 6px">
-      <div class="chart-cap">Workout volume <span class="muted">· last ${volSeries.length} session${volSeries.length > 1 ? 's' : ''}</span></div>
-      ${svgBarChart(volSeries)}
-    </div>
-    ${chartEx ? `
-    <div class="stat" style="padding:14px 14px 6px;margin-top:10px">
-      <div class="chart-cap" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-        <span id="chart-ex-label">${escapeHtml(metricLabel(chartEx))}</span>
-        <select id="chart-ex" class="mini-select" aria-label="Choose exercise">
-          ${chartable.map((n) => `<option value="${escapeHtml(n)}" ${n === chartEx ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}
-        </select>
-      </div>
-      <div id="chart-ex-body">${svgLineChart(exerciseSeries(chartEx))}</div>
-    </div>` : ''}` : '';
+  const topProg = progs.length ? `
+    <div class="section-title">Ready to progress${progs.length > 1 ? ` <a data-tab="you" style="float:right;font-weight:600;color:var(--accent);text-transform:none;letter-spacing:0">See all ${progs.length} ›</a>` : ''}</div>
+    ${progCardHtml(progs[0])}` : '';
 
   document.getElementById('app').innerHTML = `
     <header class="app-header">
@@ -588,45 +587,143 @@ function renderHome() {
       <div class="stat wide"><div class="num">${fmtDuration(s.totalTime)}</div><div class="lbl">Total time trained</div></div>
     </div>
 
-    ${progHtml}
-
-    <div class="section-title">Start a workout</div>
-    ${dayCards}
-    <button class="btn btn-ghost btn-block mt8" data-customize>✎ Customize exercises</button>
-
-    ${chartsHtml}
-
-    <div class="section-title">Recent sessions</div>
-    ${recent || '<div class="empty">No workouts logged yet. Pick a day above to start.</div>'}
-
-    ${bestNames.length ? `<div class="section-title">Personal bests</div><div class="stat" style="padding:6px 16px">${bestsHtml}</div>` : ''}
-
-    <p class="center muted mt16" style="font-size:12px">Data is saved on this device only.</p>
+    ${topProg}
+    ${tabBar('home')}
   `;
 
-  // wire up
   $('[data-settings]').addEventListener('click', openSettings);
   $('[data-timer]').addEventListener('click', startStandaloneTimer);
   $('[data-profiles]').addEventListener('click', renderProfiles);
   document.querySelectorAll('[data-start]').forEach((b) =>
     b.addEventListener('click', () => startWorkout(b.dataset.start)));
-  document.querySelectorAll('[data-editday]').forEach((b) =>
-    b.addEventListener('click', () => renderDayEditor(b.dataset.editday)));
-  document.querySelectorAll('[data-editsession]').forEach((b) =>
-    b.addEventListener('click', () => renderSessionEditor(b.dataset.editsession)));
-  $('[data-customize]').addEventListener('click', renderPlanPicker);
   const resumeBtn = $('[data-resume]');
   if (resumeBtn) resumeBtn.addEventListener('click', () => renderWorkout());
+  wireTabs();
+  syncWake();
+}
 
-  // progress line-chart exercise selector — swap just the chart body
+/* ================================================================== *
+ * TAB: Workout (idle) — pick a day to start
+ * ================================================================== */
+function renderStartWorkout() {
+  document.getElementById('app').innerHTML = `
+    <header class="app-header"><h1>Start a workout</h1></header>
+    ${dayCardsHtml()}
+    <button class="btn btn-ghost btn-block mt8" data-customize>✎ Customize plan</button>
+    ${tabBar('workout')}
+  `;
+  document.querySelectorAll('[data-start]').forEach((b) =>
+    b.addEventListener('click', () => startWorkout(b.dataset.start)));
+  document.querySelectorAll('[data-editday]').forEach((b) =>
+    b.addEventListener('click', () => renderDayEditor(b.dataset.editday)));
+  $('[data-customize]').addEventListener('click', renderPlanPicker);
+  wireTabs();
+  syncWake();
+}
+
+/* ================================================================== *
+ * TAB: History — recent sessions + progress charts
+ * ================================================================== */
+function renderHistory() {
+  const recent = history.map((h) => `
+    <button class="hist-item" data-editsession="${h.id}">
+      <div>
+        <div class="h-day">${escapeHtml(userPlan.days[h.dayId] ? userPlan.days[h.dayId].name : h.dayName || 'Workout')}</div>
+        <div class="h-date">${fmtDate(h.date)}${h.durationSec ? ' · ' + Math.round(h.durationSec / 60) + ' min' : ''}</div>
+      </div>
+      <div class="h-vol">
+        <div class="v">${fmtVol(h.volume != null ? h.volume : sessionVolume(h))} ${settings.unit}</div>
+        <div class="l">volume ›</div>
+      </div>
+    </button>`).join('');
+
+  const chartable = chartableExercises();
+  if (chartEx == null || !chartable.includes(chartEx)) chartEx = chartable[0] || null;
+  const volSeries = volumeSeries(10);
+  const chartsHtml = history.length ? `
+    <div class="section-title">Progress</div>
+    <div class="stat" style="padding:14px 14px 6px">
+      <div class="chart-cap">Workout volume <span class="muted">· last ${volSeries.length} session${volSeries.length > 1 ? 's' : ''}</span></div>
+      ${svgBarChart(volSeries)}
+    </div>
+    ${chartEx ? `
+    <div class="stat" style="padding:14px 14px 6px;margin-top:10px">
+      <div class="chart-cap" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <span id="chart-ex-label">${escapeHtml(metricLabel(chartEx))}</span>
+        <select id="chart-ex" class="mini-select" aria-label="Choose exercise">
+          ${chartable.map((n) => `<option value="${escapeHtml(n)}" ${n === chartEx ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}
+        </select>
+      </div>
+      <div id="chart-ex-body">${svgLineChart(exerciseSeries(chartEx))}</div>
+    </div>` : ''}` : '';
+
+  document.getElementById('app').innerHTML = `
+    <header class="app-header"><h1>History</h1></header>
+    ${chartsHtml}
+    <div class="section-title">Recent sessions</div>
+    ${recent || '<div class="empty">No workouts logged yet. Start one from the Workout tab.</div>'}
+    ${tabBar('history')}
+  `;
+
+  document.querySelectorAll('[data-editsession]').forEach((b) =>
+    b.addEventListener('click', () => renderSessionEditor(b.dataset.editsession)));
   const sel = $('#chart-ex');
   if (sel) sel.addEventListener('change', () => {
     chartEx = sel.value;
     $('#chart-ex-body').innerHTML = svgLineChart(exerciseSeries(chartEx));
     $('#chart-ex-label').textContent = metricLabel(chartEx);
   });
+  wireTabs();
+  syncWake();
+}
 
-  syncWake();   // not on the workout screen → release any screen lock
+/* ================================================================== *
+ * TAB: You — profile, all progressions, personal bests, settings
+ * ================================================================== */
+function renderYou() {
+  const p = currentProfile();
+  const bests = personalBests();
+  const bestNames = Object.keys(bests);
+  const bestsHtml = bestNames.length ? bestNames.map((n) => `
+      <div class="pb-row">
+        <span class="pb-name">${escapeHtml(n)}</span>
+        <span class="pb-val">${bests[n].weight} <small>${settings.unit} × ${escapeHtml(String(bests[n].reps || '—'))}</small></span>
+      </div>`).join('') : '';
+
+  const progs = allProgressions();
+  const progHtml = progs.length ? `
+    <div class="section-title">Ready to progress</div>
+    ${progs.map(progCardHtml).join('')}` : '';
+
+  document.getElementById('app').innerHTML = `
+    <header class="app-header"><h1>You</h1></header>
+
+    <div class="stat" style="text-align:left;padding:16px;display:flex;align-items:center;gap:14px">
+      <span class="profile-chip" style="width:48px;height:48px;font-size:20px;flex:0 0 auto">${escapeHtml((p.name[0] || '?').toUpperCase())}</span>
+      <span>
+        <div style="font-family:var(--ff-display);font-weight:700;font-size:18px">${escapeHtml(p.name)}</div>
+        <div class="muted" style="font-size:13px">${escapeHtml(p.goal || '')}${(p.protect && p.protect.length) ? ' · protecting ' + escapeHtml(p.protect.join(', ')) : ''}</div>
+      </span>
+    </div>
+
+    ${progHtml}
+
+    ${bestNames.length ? `<div class="section-title">Personal bests</div><div class="stat" style="padding:6px 16px">${bestsHtml}</div>` : ''}
+
+    <div class="section-title">Settings</div>
+    <button class="btn btn-ghost btn-block" data-customize>✎ Customize plan</button>
+    <button class="btn btn-ghost btn-block mt8" data-profiles>Profiles</button>
+    <button class="btn btn-ghost btn-block mt8" data-settings>Preferences — theme, units, sounds…</button>
+
+    <p class="center muted mt16" style="font-size:12px">Data is saved on this device only.</p>
+    ${tabBar('you')}
+  `;
+
+  $('[data-customize]').addEventListener('click', renderPlanPicker);
+  $('[data-profiles]').addEventListener('click', renderProfiles);
+  $('[data-settings]').addEventListener('click', openSettings);
+  wireTabs();
+  syncWake();
 }
 
 /* ================================================================== *

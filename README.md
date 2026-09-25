@@ -61,12 +61,24 @@ change so the offline copy refreshes.
 
 ## Roadmap
 
+In progress:
+- **UI redesign** — a tabbed navigation (Home / Workout / History / You) with
+  light/dark themes is being built on the `redesign` branch.
+
 Under analysis (paused):
 - **PT plan sharing — Option A** — trainers set up a company profile and share a
   branded workout plan with clients via a link (no backend); clients import in one
   tap. Direction chosen (one-time unlock, target = beginner PTs on PDFs/WhatsApp,
   stay web not native). Paused pending demand validation. The full commercial SaaS
   version is shelved unless demand shows.
+
+Future / not scheduled:
+- **Native app** — wrap the existing PWA in a thin native shell (e.g. Capacitor)
+  from the *same* single codebase — a wrap, **not** a native rewrite — to gain
+  reliable background rest-timer sound/notifications when the phone is locked,
+  durable storage, and an App Store / Play Store presence for easier monetisation.
+  **Deferred** until the web redesign ships *and* there's a real trigger — the
+  locked-screen timer becoming a daily blocker, or the PT product validating.
 
 Ideas (not scheduled):
 - Pick-a-plan starter templates (Full Body, Push/Pull/Legs, Upper/Lower, bodyweight)
