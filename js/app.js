@@ -569,7 +569,7 @@ function renderHome() {
 
   document.getElementById('app').innerHTML = `
     <header class="app-header">
-      <h1><span class="logo">${LOGO_SVG}</span> Lift Tracker</h1>
+      <h1><span class="logo" style="color:var(--accent)">${LOGO_SVG}</span> Lift Tracker</h1>
       <div class="header-actions">
         <button class="icon-btn profile-chip" data-profiles aria-label="Profiles">${escapeHtml((currentProfile().name[0] || '?').toUpperCase())}</button>
         <button class="icon-btn" data-timer aria-label="Rest timer">⏱</button>
@@ -2353,11 +2353,11 @@ function exportData() {
  * Boot
  * ================================================================== */
 const LOGO_SVG = `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect x="1" y="9" width="3" height="6" rx="1" fill="#10a06a"/>
-  <rect x="20" y="9" width="3" height="6" rx="1" fill="#10a06a"/>
-  <rect x="4" y="7" width="3" height="10" rx="1" fill="#10a06a"/>
-  <rect x="17" y="7" width="3" height="10" rx="1" fill="#10a06a"/>
-  <rect x="7" y="11" width="10" height="2" rx="1" fill="#10a06a"/>
+  <rect x="1" y="9" width="3" height="6" rx="1" fill="currentColor"/>
+  <rect x="20" y="9" width="3" height="6" rx="1" fill="currentColor"/>
+  <rect x="4" y="7" width="3" height="10" rx="1" fill="currentColor"/>
+  <rect x="17" y="7" width="3" height="10" rx="1" fill="currentColor"/>
+  <rect x="7" y="11" width="10" height="2" rx="1" fill="currentColor"/>
 </svg>`;
 
 // First-run setup for a new profile; otherwise restore mid-workout or home.
