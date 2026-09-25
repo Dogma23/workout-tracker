@@ -343,9 +343,11 @@ function progressionFor(name) {
   //  easy  -> a completed set flagged easy (and none flagged pain)
   const feelOf = (r) => {
     const done = r.ex.sets.filter((s) => s.done);
-    if (done.some((s) => s.feel === 'pain')) return 'pain';
+    // pain flag (or legacy feel==='pain') holds progression; 'hard' is the good
+    // training zone (treated as normal); 'easy' accelerates.
+    if (done.some((s) => s.pain || s.feel === 'pain')) return 'pain';
     if (done.some((s) => s.feel === 'easy')) return 'easy';
-    return done.some((s) => s.feel === 'ok') ? 'ok' : '';
+    return '';
   };
 
   const newest = sessions[0];
@@ -851,11 +853,14 @@ function renderWorkout() {
         <button class="set-check ${set.done ? 'on' : ''}" data-check aria-label="Complete set ${si + 1}">✓</button>
         <button class="set-del" data-delset aria-label="Delete set ${si + 1}">✕</button>
       </div>
-      <div class="feel ${set.done ? 'shown' : ''}" data-ex="${ei}" data-set="${si}">
-        <span class="feel-lbl">Felt</span>
-        <button class="feel-btn ${set.feel === 'easy' ? 'on' : ''}" data-feel="easy" aria-label="Felt easy">🟢 Easy</button>
-        <button class="feel-btn ${set.feel === 'ok' ? 'on' : ''}" data-feel="ok" aria-label="Just right">🔵 Just right</button>
-        <button class="feel-btn ${set.feel === 'pain' ? 'on' : ''}" data-feel="pain" aria-label="Hard or pain">🔴 Hard / pain</button>
+      <div class="felt" data-ex="${ei}" data-set="${si}"${set.done ? '' : ' style="display:none"'}>
+        <div class="felt-q">How did it feel?</div>
+        <div class="seg3">
+          <button class="s3 easy ${set.feel === 'easy' ? 'on' : ''}" data-feel="easy">Easy</button>
+          <button class="s3 ok ${set.feel === 'ok' ? 'on' : ''}" data-feel="ok">Just right</button>
+          <button class="s3 hard ${set.feel === 'hard' ? 'on' : ''}" data-feel="hard">Hard</button>
+        </div>
+        ${settings.recordPain ? `<button class="painflag ${set.pain ? 'on' : ''}" data-pain><span class="dotx"></span> ${set.pain ? 'Pain flagged' : 'Flag pain'}</button>` : ''}
       </div>`).join('');
 
     return `
@@ -1017,16 +1022,28 @@ function wireWorkout() {
   document.querySelectorAll('[data-check]').forEach((b) =>
     b.addEventListener('click', onCheck));
 
-  // per-set "how did it feel?" tags (tap again to clear)
-  document.querySelectorAll('.feel-btn').forEach((b) =>
+  // per-set effort ladder — Easy / Just right / Hard (tap again to clear)
+  document.querySelectorAll('.felt .s3').forEach((b) =>
     b.addEventListener('click', (e) => {
-      const wrap = e.target.closest('.feel');
+      const wrap = e.target.closest('.felt');
       const ei = num(wrap.dataset.ex), si = num(wrap.dataset.set);
       const val = e.target.dataset.feel;
       const set = active.exercises[ei].sets[si];
       set.feel = (set.feel === val ? '' : val);
       save(KEY.active, active);
-      wrap.querySelectorAll('.feel-btn').forEach((x) => x.classList.toggle('on', x.dataset.feel === set.feel));
+      wrap.querySelectorAll('.s3').forEach((x) => x.classList.toggle('on', x.dataset.feel === set.feel));
+    }));
+
+  // optional pain flag (separate from the effort ladder; shown only when enabled)
+  document.querySelectorAll('.felt [data-pain]').forEach((b) =>
+    b.addEventListener('click', (e) => {
+      const wrap = e.target.closest('.felt');
+      const ei = num(wrap.dataset.ex), si = num(wrap.dataset.set);
+      const set = active.exercises[ei].sets[si];
+      set.pain = !set.pain;
+      save(KEY.active, active);
+      b.classList.toggle('on', set.pain);
+      b.innerHTML = `<span class="dotx"></span> ${set.pain ? 'Pain flagged' : 'Flag pain'}`;
     }));
 
   // add set
@@ -1133,7 +1150,7 @@ function onCheck(e) {
 
   // reveal the "how did it feel?" tags once the set is marked done
   const feelEl = row.nextElementSibling;
-  if (feelEl && feelEl.classList.contains('feel')) feelEl.classList.toggle('shown', set.done);
+  if (feelEl && feelEl.classList.contains('felt')) feelEl.style.display = set.done ? '' : 'none';
 
   // mark exercise done-all styling
   const exEl = row.closest('.exercise');
@@ -2201,6 +2218,18 @@ function openSettings() {
       </div>
     </div>
 
+    <div class="section-title">Appearance</div>
+    <div class="stat" style="padding:4px 16px">
+      <div class="settings-row">
+        <div><div class="sr-label">Theme</div><div class="sr-sub">Match your device, or force light / dark</div></div>
+        <div class="rest-chips">
+          <button class="chip ${settings.theme === 'system' ? 'active' : ''}" data-theme-opt="system">System</button>
+          <button class="chip ${settings.theme === 'light' ? 'active' : ''}" data-theme-opt="light">Light</button>
+          <button class="chip ${settings.theme === 'dark' ? 'active' : ''}" data-theme-opt="dark">Dark</button>
+        </div>
+      </div>
+    </div>
+
     <div class="section-title">Rest timer</div>
     <div class="stat" style="padding:4px 16px">
       <div class="settings-row">
@@ -2229,6 +2258,14 @@ function openSettings() {
       </div>
     </div>
 
+    <div class="section-title">Effort &amp; pain</div>
+    <div class="stat" style="padding:4px 16px">
+      <div class="settings-row">
+        <div><div class="sr-label">Record pain</div><div class="sr-sub">Adds a "Flag pain" button to each set; a flag holds progression. A coach can set this for a client.</div></div>
+        <button class="toggle ${settings.recordPain ? 'on' : ''}" id="set-pain" role="switch" aria-checked="${settings.recordPain}"></button>
+      </div>
+    </div>
+
     <div class="section-title">Units</div>
     <div class="stat" style="padding:4px 16px">
       <div class="settings-row">
@@ -2252,7 +2289,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v18 · data stored on this device</p>`;
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v19 · data stored on this device</p>`;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
   $('#set-profiles').addEventListener('click', renderProfiles);
@@ -2283,6 +2320,14 @@ function openSettings() {
     b.addEventListener('click', () => {
       settings.unit = b.dataset.unit; save(KEY.settings, settings); openSettings();
     }));
+  document.querySelectorAll('[data-theme-opt]').forEach((b) =>
+    b.addEventListener('click', () => {
+      settings.theme = b.dataset.themeOpt; save(KEY.settings, settings); applyTheme(); openSettings();
+    }));
+  $('#set-pain').addEventListener('click', (e) => {
+    settings.recordPain = !settings.recordPain; e.target.classList.toggle('on', settings.recordPain);
+    save(KEY.settings, settings);
+  });
   $('#set-export').addEventListener('click', exportData);
   $('#set-reset').addEventListener('click', (e) => armThen(e.target, 'Tap again to erase', () => {
     [KEY.history, KEY.active, KEY.last, KEY.settings, KEY.plan, KEY.warmup].forEach((k) => localStorage.removeItem(k));
