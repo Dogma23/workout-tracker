@@ -17,7 +17,8 @@ screen (it's a PWA). No accounts, no server — your data lives on your device.
 - **Workout time** — a live elapsed clock ticks in the header while you train, and the dashboard shows your cumulative "total time trained".
 - **Hydration reminders** — during a workout it nudges you to drink water at your chosen interval (default every 15 min) with a gentle sound, vibrate and on-screen prompt. Configurable / switch-off in Settings.
 - **Progression prompts** — follows the plan's "every ~2 weeks, if it's easy, nudge it up" rule. When you've held a weight for 2+ sessions while hitting the top of the rep range, the dashboard flags the lift as *Ready to progress* and the workout screen shows a one-tap button to load the suggested next weight (+2.5 kg / +5 lb, or +1 rep / +5s for bodyweight moves and holds).
-- **Tabbed navigation** — a bottom tab bar splits the app into **Home** (today's workout, quick stats, top progression), **Workout** (pick a day, or your session in progress), **History** (sessions + progress charts) and **You** (profile, personal bests, settings) — no more one endless scroll.
+- **Tabbed navigation** — a bottom tab bar splits the app into **Home** (every workout listed with the suggested one tagged, so you always choose what to start), **Progress** (stats, ready-to-progress, personal bests and charts), **History** (sessions from the last 30 days) and **You** (profile photo, settings) — no more one endless scroll.
+- **Profile photo** — tap the avatar on the You tab to add a photo; it's resized on your device and stored locally.
 - **Light & dark themes** — a blue identity in both; choose System, Light or Dark in Settings → Appearance (saved per profile).
 - **Effort & optional pain** — after you tick a set complete: **How did it feel?** Easy · Just right · Hard, plus an optional **Any pain?** flag. Easy at the top of the rep range brings the progress nudge *sooner*; Hard is treated as the right training zone; a pain flag *holds* progression with a gentle "keep the load the same" caution. Pain recording can be switched on/off in Settings → Effort & pain (a coach can set it for a client). Everything is optional and never blocks logging.
 - **Dashboard graphs** — a workout-volume bar chart over your recent sessions, and a per-exercise weight-progress line chart with an exercise picker. Drawn as inline SVG (no chart libraries), so they work offline too.
@@ -88,7 +89,7 @@ Recently shipped: light redesign · multi-profile · smart injury-aware cautions
 reminders · workout timer/clock · how-to links · mid-workout add/swap/reorder ·
 supersets (grouping + smart rest) · per-set effort tags (feel-aware progression) ·
 per-day pre/post-workout segments (warm-up / stretch / cardio / none) with per-move timers ·
-**v21 redesign**: tabbed navigation, blue light/dark themes, Kanit + Sarabun type, effort ladder + optional pain flag.
+**v21–22 redesign**: tabbed navigation, blue light/dark themes, Kanit + Sarabun type, effort ladder + optional pain flag.
 
 ---
 

@@ -69,6 +69,31 @@ let profiles = loadProfiles();
 const saveProfiles = () => save(PROFILES_KEY, profiles);
 const currentProfile = () => profiles.list.find((p) => p.id === profiles.currentId) || profiles.list[0];
 
+// Avatar: the profile photo if one was added, otherwise the first initial.
+const initialOf = (p) => escapeHtml(((p && p.name) || '?').trim().charAt(0).toUpperCase() || '?');
+const avatarInner = (p) => (p && p.avatar)
+  ? `<img class="av-img" src="${p.avatar}" alt="">`
+  : initialOf(p);
+
+// Shrink a chosen photo to a small centre-cropped square JPEG so it fits
+// comfortably in localStorage (~15–30 KB).
+function resizeAvatar(file, size = 192) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const side = Math.min(img.naturalWidth, img.naturalHeight);
+      const sx = (img.naturalWidth - side) / 2, sy = (img.naturalHeight - side) / 2;
+      const c = document.createElement('canvas'); c.width = size; c.height = size;
+      c.getContext('2d').drawImage(img, sx, sy, side, side, 0, 0, size, size);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('unreadable image')); };
+    img.src = url;
+  });
+}
+
 /* ------------------------------------------------------------------ *
  * Per-profile app state (repointed by loadProfileState on switch)
  * ------------------------------------------------------------------ */
@@ -490,11 +515,11 @@ function svgLineChart(points) {
  * ------------------------------------------------------------------ */
 const TAB_ICONS = {
   home: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>',
-  workout: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/></svg>',
-  history: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>',
+  progress: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>',
+  history: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
   you: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6"/></svg>',
 };
-const TAB_LIST = [['home', 'Home'], ['workout', 'Workout'], ['history', 'History'], ['you', 'You']];
+const TAB_LIST = [['home', 'Home'], ['progress', 'Progress'], ['history', 'History'], ['you', 'You']];
 function tabBar(active) {
   return `<nav class="tabbar">${TAB_LIST.map(([id, label]) =>
     `<button class="tab ${id === active ? 'on' : ''}" data-tab="${id}" aria-label="${label}">${TAB_ICONS[id]}<span>${label}</span></button>`).join('')}</nav>`;
@@ -503,25 +528,28 @@ function wireTabs() {
   document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => goTab(b.dataset.tab)));
 }
 function goTab(tab) {
-  if (tab === 'workout') return active ? renderWorkout() : renderStartWorkout();
+  if (tab === 'progress') return renderProgress();
   if (tab === 'history') return renderHistory();
   if (tab === 'you') return renderYou();
   return renderHome();
 }
 
-// Day cards ("choose a workout") — reused by Home resume + Workout tab.
-function dayCardsHtml() {
+// Day cards — every workout in the plan, so the user always chooses what to
+// start. The suggested (least recently trained) day is tagged, not forced.
+function dayCardsHtml(suggestedId) {
   return userPlan.order.map((id) => {
     const d = userPlan.days[id];
+    const sug = id === suggestedId;
     return `
-      <div class="day-card">
-        <button class="dc-hit" data-start="${id}">
+      <div class="day-card ${sug ? 'suggested' : ''}">
+        <button class="dc-hit" data-start="${id}" aria-label="Start ${escapeHtml(d.name)}">
           <span class="badge">${escapeHtml(d.name[0])}</span>
           <span class="dc-text">
-            <div class="dc-name">${escapeHtml(d.name)}</div>
+            <div class="dc-name">${escapeHtml(d.name)}${sug ? ' <span class="dc-tag">Suggested</span>' : ''}</div>
             <div class="dc-sub">${escapeHtml(d.subtitle || '')}</div>
             <div class="dc-meta">${d.day ? escapeHtml(d.day) + ' · ' : ''}${d.exercises.length} exercise${d.exercises.length === 1 ? '' : 's'}</div>
           </span>
+          <span class="dc-go">Start ›</span>
         </button>
         <button class="dc-edit" data-editday="${id}" aria-label="Edit ${escapeHtml(d.name)}">✎</button>
       </div>`;
@@ -540,10 +568,9 @@ function progCardHtml(p) {
 }
 
 /* ================================================================== *
- * TAB: Home — today's workout, quick stats, top progression
+ * TAB: Home — choose today's workout (all days listed, suggested tagged)
  * ================================================================== */
 function renderHome() {
-  const s = stats();
   const activeDay = active && userPlan.days[active.dayId];
   const resumeHtml = active ? `
     <div class="resume">
@@ -554,32 +581,85 @@ function renderHome() {
       <button class="btn" data-resume>Resume</button>
     </div>` : '';
 
-  const sug = userPlan.days[suggestedDayId()];
-  const heroHtml = active ? '' : `
-    <div class="hero">
-      <div class="hero-date">${new Date().toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}</div>
-      <h2 class="hero-title"><span>${escapeHtml(sug.name)}</span> day is ready</h2>
-      <button class="btn btn-block btn-lg" data-start="${sug.id}">Start today's workout</button>
-    </div>`;
-
-  const progs = allProgressions();
-  const topProg = progs.length ? `
-    <div class="section-title">Ready to progress${progs.length > 1 ? ` <a data-tab="you" style="float:right;font-weight:600;color:var(--accent);text-transform:none;letter-spacing:0">See all ${progs.length} ›</a>` : ''}</div>
-    ${progCardHtml(progs[0])}` : '';
+  const sugId = suggestedDayId();
+  const sug = userPlan.days[sugId];
 
   document.getElementById('app').innerHTML = `
     <header class="app-header">
       <h1><span class="logo" style="color:var(--accent)">${LOGO_SVG}</span> Lift Tracker</h1>
       <div class="header-actions">
-        <button class="icon-btn profile-chip" data-profiles aria-label="Profiles">${escapeHtml((currentProfile().name[0] || '?').toUpperCase())}</button>
+        <button class="icon-btn profile-chip" data-profiles aria-label="Profiles">${avatarInner(currentProfile())}</button>
         <button class="icon-btn" data-timer aria-label="Rest timer">⏱</button>
         <button class="icon-btn" data-settings aria-label="Settings">⚙</button>
       </div>
     </header>
 
     ${resumeHtml}
-    ${heroHtml}
+    <div class="hero">
+      <div class="hero-date">${new Date().toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}</div>
+      <h2 class="hero-title">Choose today's <span>workout</span></h2>
+      ${sug ? `<p class="hero-sub">Suggested: <b>${escapeHtml(sug.name)}</b> — the day you trained least recently. Tap any day to start.</p>` : ''}
+    </div>
     ${currentProfile().conditions ? `<div class="cond-note"><b>Note:</b> ${escapeHtml(currentProfile().conditions)} — train accordingly and follow your clinician's advice.</div>` : ''}
+
+    ${dayCardsHtml(active ? null : sugId)}
+    <button class="btn btn-ghost btn-block mt8" data-customize>✎ Customize plan</button>
+    ${tabBar('home')}
+  `;
+
+  $('[data-settings]').addEventListener('click', openSettings);
+  $('[data-timer]').addEventListener('click', startStandaloneTimer);
+  $('[data-profiles]').addEventListener('click', renderProfiles);
+  document.querySelectorAll('[data-start]').forEach((b) =>
+    b.addEventListener('click', () => startWorkout(b.dataset.start)));
+  document.querySelectorAll('[data-editday]').forEach((b) =>
+    b.addEventListener('click', () => renderDayEditor(b.dataset.editday)));
+  $('[data-customize]').addEventListener('click', renderPlanPicker);
+  const resumeBtn = $('[data-resume]');
+  if (resumeBtn) resumeBtn.addEventListener('click', () => renderWorkout());
+  wireTabs();
+  syncWake();
+}
+
+/* ================================================================== *
+ * TAB: Progress — stats, ready-to-progress, charts
+ * ================================================================== */
+function renderProgress() {
+  const s = stats();
+  const bests = personalBests();
+  const bestNames = Object.keys(bests);
+  const bestsHtml = bestNames.length ? `<div class="section-title">Personal bests</div><div class="stat" style="padding:8px 16px">${bestNames.map((n) => `
+      <div class="pb-row">
+        <span class="pb-name">${escapeHtml(n)}</span>
+        <span class="pb-val">${bests[n].weight} <small>${settings.unit} × ${escapeHtml(String(bests[n].reps || '—'))}</small></span>
+      </div>`).join('')}</div>` : '';
+  const progs = allProgressions();
+  const progHtml = progs.length ? `
+    <div class="section-title">Ready to progress</div>
+    ${progs.map(progCardHtml).join('')}` : '';
+
+  const chartable = chartableExercises();
+  if (chartEx == null || !chartable.includes(chartEx)) chartEx = chartable[0] || null;
+  const volSeries = volumeSeries(10);
+  const chartsHtml = history.length ? `
+    <div class="section-title">Charts</div>
+    <div class="stat" style="padding:16px 16px 8px">
+      <div class="chart-cap">Workout volume <span class="muted">· last ${volSeries.length} session${volSeries.length > 1 ? 's' : ''}</span></div>
+      ${svgBarChart(volSeries)}
+    </div>
+    ${chartEx ? `
+    <div class="stat" style="padding:16px 16px 8px;margin-top:8px">
+      <div class="chart-cap" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <span id="chart-ex-label">${escapeHtml(metricLabel(chartEx))}</span>
+        <select id="chart-ex" class="mini-select" aria-label="Choose exercise">
+          ${chartable.map((n) => `<option value="${escapeHtml(n)}" ${n === chartEx ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}
+        </select>
+      </div>
+      <div id="chart-ex-body">${svgLineChart(exerciseSeries(chartEx))}</div>
+    </div>` : ''}` : '<div class="empty">Log a few workouts to see your charts here.</div>';
+
+  document.getElementById('app').innerHTML = `
+    <header class="app-header"><h1>Progress</h1></header>
 
     <div class="stat-grid">
       <div class="stat accent"><div class="num">${s.total}</div><div class="lbl">Workouts</div></div>
@@ -589,86 +669,12 @@ function renderHome() {
       <div class="stat wide"><div class="num">${fmtDuration(s.totalTime)}</div><div class="lbl">Total time trained</div></div>
     </div>
 
-    ${topProg}
-    ${tabBar('home')}
-  `;
-
-  $('[data-settings]').addEventListener('click', openSettings);
-  $('[data-timer]').addEventListener('click', startStandaloneTimer);
-  $('[data-profiles]').addEventListener('click', renderProfiles);
-  document.querySelectorAll('[data-start]').forEach((b) =>
-    b.addEventListener('click', () => startWorkout(b.dataset.start)));
-  const resumeBtn = $('[data-resume]');
-  if (resumeBtn) resumeBtn.addEventListener('click', () => renderWorkout());
-  wireTabs();
-  syncWake();
-}
-
-/* ================================================================== *
- * TAB: Workout (idle) — pick a day to start
- * ================================================================== */
-function renderStartWorkout() {
-  document.getElementById('app').innerHTML = `
-    <header class="app-header"><h1>Start a workout</h1></header>
-    ${dayCardsHtml()}
-    <button class="btn btn-ghost btn-block mt8" data-customize>✎ Customize plan</button>
-    ${tabBar('workout')}
-  `;
-  document.querySelectorAll('[data-start]').forEach((b) =>
-    b.addEventListener('click', () => startWorkout(b.dataset.start)));
-  document.querySelectorAll('[data-editday]').forEach((b) =>
-    b.addEventListener('click', () => renderDayEditor(b.dataset.editday)));
-  $('[data-customize]').addEventListener('click', renderPlanPicker);
-  wireTabs();
-  syncWake();
-}
-
-/* ================================================================== *
- * TAB: History — recent sessions + progress charts
- * ================================================================== */
-function renderHistory() {
-  const recent = history.map((h) => `
-    <button class="hist-item" data-editsession="${h.id}">
-      <div>
-        <div class="h-day">${escapeHtml(userPlan.days[h.dayId] ? userPlan.days[h.dayId].name : h.dayName || 'Workout')}</div>
-        <div class="h-date">${fmtDate(h.date)}${h.durationSec ? ' · ' + Math.round(h.durationSec / 60) + ' min' : ''}</div>
-      </div>
-      <div class="h-vol">
-        <div class="v">${fmtVol(h.volume != null ? h.volume : sessionVolume(h))} ${settings.unit}</div>
-        <div class="l">volume ›</div>
-      </div>
-    </button>`).join('');
-
-  const chartable = chartableExercises();
-  if (chartEx == null || !chartable.includes(chartEx)) chartEx = chartable[0] || null;
-  const volSeries = volumeSeries(10);
-  const chartsHtml = history.length ? `
-    <div class="section-title">Progress</div>
-    <div class="stat" style="padding:14px 14px 6px">
-      <div class="chart-cap">Workout volume <span class="muted">· last ${volSeries.length} session${volSeries.length > 1 ? 's' : ''}</span></div>
-      ${svgBarChart(volSeries)}
-    </div>
-    ${chartEx ? `
-    <div class="stat" style="padding:14px 14px 6px;margin-top:10px">
-      <div class="chart-cap" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-        <span id="chart-ex-label">${escapeHtml(metricLabel(chartEx))}</span>
-        <select id="chart-ex" class="mini-select" aria-label="Choose exercise">
-          ${chartable.map((n) => `<option value="${escapeHtml(n)}" ${n === chartEx ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}
-        </select>
-      </div>
-      <div id="chart-ex-body">${svgLineChart(exerciseSeries(chartEx))}</div>
-    </div>` : ''}` : '';
-
-  document.getElementById('app').innerHTML = `
-    <header class="app-header"><h1>History</h1></header>
+    ${progHtml}
+    ${bestsHtml}
     ${chartsHtml}
-    <div class="section-title">Recent sessions</div>
-    ${recent || '<div class="empty">No workouts logged yet. Start one from the Workout tab.</div>'}
-    ${tabBar('history')}
+    ${tabBar('progress')}
   `;
 
-  document.querySelectorAll('[data-editsession]').forEach((b) =>
-    b.addEventListener('click', () => renderSessionEditor(b.dataset.editsession)));
   const sel = $('#chart-ex');
   if (sel) sel.addEventListener('change', () => {
     chartEx = sel.value;
@@ -680,37 +686,59 @@ function renderHistory() {
 }
 
 /* ================================================================== *
- * TAB: You — profile, all progressions, personal bests, settings
+ * TAB: History — sessions from the last 30 days
+ * ================================================================== */
+const HISTORY_DAYS = 30;
+function renderHistory() {
+  const cutoff = Date.now() - HISTORY_DAYS * 864e5;
+  const recentList = history.filter((h) => h.date >= cutoff);
+  const olderCount = history.length - recentList.length;
+  const rows = recentList.map((h) => `
+    <button class="hist-item" data-editsession="${h.id}">
+      <div>
+        <div class="h-day">${escapeHtml(userPlan.days[h.dayId] ? userPlan.days[h.dayId].name : h.dayName || 'Workout')}</div>
+        <div class="h-date">${fmtDate(h.date)}${h.durationSec ? ' · ' + Math.round(h.durationSec / 60) + ' min' : ''}</div>
+      </div>
+      <div class="h-vol">
+        <div class="v">${fmtVol(h.volume != null ? h.volume : sessionVolume(h))} ${settings.unit}</div>
+        <div class="l">volume ›</div>
+      </div>
+    </button>`).join('');
+
+  document.getElementById('app').innerHTML = `
+    <header class="app-header"><h1>History</h1></header>
+    <div class="section-title">Last ${HISTORY_DAYS} days · ${recentList.length} session${recentList.length === 1 ? '' : 's'}</div>
+    ${rows || '<div class="empty">No workouts in the last 30 days. Pick one on the Home tab.</div>'}
+    ${olderCount ? `<p class="center muted mt16" style="font-size:12px">${olderCount} older session${olderCount === 1 ? '' : 's'} not shown — still counted in Progress, and included in Export.</p>` : ''}
+    ${tabBar('history')}
+  `;
+
+  document.querySelectorAll('[data-editsession]').forEach((b) =>
+    b.addEventListener('click', () => renderSessionEditor(b.dataset.editsession)));
+  wireTabs();
+  syncWake();
+}
+
+/* ================================================================== *
+ * TAB: You — profile, personal bests, settings
  * ================================================================== */
 function renderYou() {
   const p = currentProfile();
-  const bests = personalBests();
-  const bestNames = Object.keys(bests);
-  const bestsHtml = bestNames.length ? bestNames.map((n) => `
-      <div class="pb-row">
-        <span class="pb-name">${escapeHtml(n)}</span>
-        <span class="pb-val">${bests[n].weight} <small>${settings.unit} × ${escapeHtml(String(bests[n].reps || '—'))}</small></span>
-      </div>`).join('') : '';
-
-  const progs = allProgressions();
-  const progHtml = progs.length ? `
-    <div class="section-title">Ready to progress</div>
-    ${progs.map(progCardHtml).join('')}` : '';
-
   document.getElementById('app').innerHTML = `
     <header class="app-header"><h1>You</h1></header>
 
-    <div class="stat" style="text-align:left;padding:16px;display:flex;align-items:center;gap:14px">
-      <span class="profile-chip" style="width:48px;height:48px;font-size:20px;flex:0 0 auto">${escapeHtml((p.name[0] || '?').toUpperCase())}</span>
-      <span>
-        <div style="font-family:var(--ff-display);font-weight:700;font-size:18px">${escapeHtml(p.name)}</div>
-        <div class="muted" style="font-size:13px">${escapeHtml(p.goal || '')}${(p.protect && p.protect.length) ? ' · protecting ' + escapeHtml(p.protect.join(', ')) : ''}</div>
-      </span>
+    <div class="you-card">
+      <label class="you-av" for="av-file" title="Change photo">${avatarInner(p)}<span class="you-av-cam" aria-hidden="true">📷</span></label>
+      <input type="file" id="av-file" accept="image/*" hidden />
+      <div class="you-info">
+        <div class="you-name">${escapeHtml(p.name)}</div>
+        <div class="you-sub">${escapeHtml(p.goal || '')}${(p.protect && p.protect.length) ? ' · protecting ' + escapeHtml(p.protect.join(', ')) : ''}</div>
+        <div class="you-av-actions">
+          <label class="text-btn" for="av-file">${p.avatar ? 'Change photo' : 'Add photo'}</label>
+          ${p.avatar ? '<button class="text-btn" data-av-remove>Remove</button>' : ''}
+        </div>
+      </div>
     </div>
-
-    ${progHtml}
-
-    ${bestNames.length ? `<div class="section-title">Personal bests</div><div class="stat" style="padding:6px 16px">${bestsHtml}</div>` : ''}
 
     <div class="section-title">Settings</div>
     <button class="btn btn-ghost btn-block" data-customize>✎ Customize plan</button>
@@ -721,6 +749,20 @@ function renderYou() {
     ${tabBar('you')}
   `;
 
+  $('#av-file').addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    try {
+      p.avatar = await resizeAvatar(file);
+      saveProfiles();
+      toast('Photo updated');
+    } catch (err) {
+      toast("Couldn't read that image — try another photo");
+    }
+    renderYou();
+  });
+  const rm = $('[data-av-remove]');
+  if (rm) rm.addEventListener('click', () => { delete p.avatar; saveProfiles(); toast('Photo removed'); renderYou(); });
   $('[data-customize]').addEventListener('click', renderPlanPicker);
   $('[data-profiles]').addEventListener('click', renderProfiles);
   $('[data-settings]').addEventListener('click', openSettings);
@@ -2079,7 +2121,7 @@ function renderProfiles() {
     return `
       <div class="prof-row ${cur ? 'current' : ''}">
         <button class="prof-hit" data-switch="${p.id}">
-          <span class="prof-av">${escapeHtml((p.name[0] || '?').toUpperCase())}</span>
+          <span class="prof-av">${avatarInner(p)}</span>
           <span class="prof-main">
             <span class="prof-name">${escapeHtml(p.name)}${cur ? ' <span class="prof-badge">current</span>' : ''}</span>
             <span class="prof-sub">${escapeHtml(areas)}</span>
@@ -2290,7 +2332,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v21 · data stored on this device</p>`;
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v22 · data stored on this device</p>`;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
   $('#set-profiles').addEventListener('click', renderProfiles);
