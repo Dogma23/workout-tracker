@@ -16,7 +16,15 @@ const load = (k, fallback) => {
 };
 const save = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 
-const DEFAULT_SETTINGS = { rest: 90, sound: true, vibrate: true, unit: 'kg', hydration: true, hydrationMin: 15 };
+const DEFAULT_SETTINGS = { rest: 90, sound: true, vibrate: true, unit: 'kg', hydration: true, hydrationMin: 15, theme: 'system', recordPain: true };
+
+// Apply the chosen theme by stamping the root element. 'system' removes the
+// stamp so the OS preference (prefers-color-scheme) decides.
+function applyTheme() {
+  const t = (settings && settings.theme) || 'system';
+  if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+  else delete document.documentElement.dataset.theme;
+}
 
 /* ------------------------------------------------------------------ *
  * Profiles — each person's data lives under keys namespaced by profile id
@@ -80,6 +88,7 @@ function loadProfileState() {
   if (!userPlan) { userPlan = seedPlan(); save(KEY.plan, userPlan); }
   if (ensureRoutines()) savePlan();   // seed warm-up / stretch onto older plans
   chartEx = null;
+  applyTheme();   // per-profile theme choice
 }
 
 // Segment types the PT can choose for the pre- and post-workout slots.
@@ -334,9 +343,11 @@ function progressionFor(name) {
   //  easy  -> a completed set flagged easy (and none flagged pain)
   const feelOf = (r) => {
     const done = r.ex.sets.filter((s) => s.done);
-    if (done.some((s) => s.feel === 'pain')) return 'pain';
+    // pain flag (or legacy feel==='pain') holds progression; 'hard' is the good
+    // training zone (treated as normal); 'easy' accelerates.
+    if (done.some((s) => s.pain || s.feel === 'pain')) return 'pain';
     if (done.some((s) => s.feel === 'easy')) return 'easy';
-    return done.some((s) => s.feel === 'ok') ? 'ok' : '';
+    return '';
   };
 
   const newest = sessions[0];
@@ -474,11 +485,65 @@ function svgLineChart(points) {
 /* ================================================================== *
  * VIEW: Home / Dashboard
  * ================================================================== */
+/* ------------------------------------------------------------------ *
+ * Bottom tab navigation shell (Home / Workout / History / You)
+ * ------------------------------------------------------------------ */
+const TAB_ICONS = {
+  home: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>',
+  workout: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/></svg>',
+  history: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>',
+  you: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6"/></svg>',
+};
+const TAB_LIST = [['home', 'Home'], ['workout', 'Workout'], ['history', 'History'], ['you', 'You']];
+function tabBar(active) {
+  return `<nav class="tabbar">${TAB_LIST.map(([id, label]) =>
+    `<button class="tab ${id === active ? 'on' : ''}" data-tab="${id}" aria-label="${label}">${TAB_ICONS[id]}<span>${label}</span></button>`).join('')}</nav>`;
+}
+function wireTabs() {
+  document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => goTab(b.dataset.tab)));
+}
+function goTab(tab) {
+  if (tab === 'workout') return active ? renderWorkout() : renderStartWorkout();
+  if (tab === 'history') return renderHistory();
+  if (tab === 'you') return renderYou();
+  return renderHome();
+}
+
+// Day cards ("choose a workout") — reused by Home resume + Workout tab.
+function dayCardsHtml() {
+  return userPlan.order.map((id) => {
+    const d = userPlan.days[id];
+    return `
+      <div class="day-card">
+        <button class="dc-hit" data-start="${id}">
+          <span class="badge">${escapeHtml(d.name[0])}</span>
+          <span class="dc-text">
+            <div class="dc-name">${escapeHtml(d.name)}</div>
+            <div class="dc-sub">${escapeHtml(d.subtitle || '')}</div>
+            <div class="dc-meta">${d.day ? escapeHtml(d.day) + ' · ' : ''}${d.exercises.length} exercise${d.exercises.length === 1 ? '' : 's'}</div>
+          </span>
+        </button>
+        <button class="dc-edit" data-editday="${id}" aria-label="Edit ${escapeHtml(d.name)}">✎</button>
+      </div>`;
+  }).join('');
+}
+function progCardHtml(p) {
+  return `
+      <div class="prog-card">
+        <div class="prog-i">⬆</div>
+        <div class="prog-main">
+          <div class="prog-name">${escapeHtml(p.name)}</div>
+          <div class="prog-detail">${escapeHtml(p.detail)}</div>
+        </div>
+        <div class="prog-next">${escapeHtml(p.label)}</div>
+      </div>`;
+}
+
+/* ================================================================== *
+ * TAB: Home — today's workout, quick stats, top progression
+ * ================================================================== */
 function renderHome() {
   const s = stats();
-  const bests = personalBests();
-  const bestNames = Object.keys(bests);
-
   const activeDay = active && userPlan.days[active.dayId];
   const resumeHtml = active ? `
     <div class="resume">
@@ -497,23 +562,72 @@ function renderHome() {
       <button class="btn btn-block btn-lg" data-start="${sug.id}">Start today's workout</button>
     </div>`;
 
-  const dayCards = userPlan.order.map((id) => {
-    const d = userPlan.days[id];
-    return `
-      <div class="day-card">
-        <button class="dc-hit" data-start="${id}">
-          <span class="badge">${escapeHtml(d.name[0])}</span>
-          <span class="dc-text">
-            <div class="dc-name">${escapeHtml(d.name)}</div>
-            <div class="dc-sub">${escapeHtml(d.subtitle || '')}</div>
-            <div class="dc-meta">${d.day ? escapeHtml(d.day) + ' · ' : ''}${d.exercises.length} exercise${d.exercises.length === 1 ? '' : 's'}</div>
-          </span>
-        </button>
-        <button class="dc-edit" data-editday="${id}" aria-label="Edit ${escapeHtml(d.name)}">✎</button>
-      </div>`;
-  }).join('');
+  const progs = allProgressions();
+  const topProg = progs.length ? `
+    <div class="section-title">Ready to progress${progs.length > 1 ? ` <a data-tab="you" style="float:right;font-weight:600;color:var(--accent);text-transform:none;letter-spacing:0">See all ${progs.length} ›</a>` : ''}</div>
+    ${progCardHtml(progs[0])}` : '';
 
-  const recent = history.slice(0, 5).map((h) => `
+  document.getElementById('app').innerHTML = `
+    <header class="app-header">
+      <h1><span class="logo" style="color:var(--accent)">${LOGO_SVG}</span> Lift Tracker</h1>
+      <div class="header-actions">
+        <button class="icon-btn profile-chip" data-profiles aria-label="Profiles">${escapeHtml((currentProfile().name[0] || '?').toUpperCase())}</button>
+        <button class="icon-btn" data-timer aria-label="Rest timer">⏱</button>
+        <button class="icon-btn" data-settings aria-label="Settings">⚙</button>
+      </div>
+    </header>
+
+    ${resumeHtml}
+    ${heroHtml}
+    ${currentProfile().conditions ? `<div class="cond-note"><b>Note:</b> ${escapeHtml(currentProfile().conditions)} — train accordingly and follow your clinician's advice.</div>` : ''}
+
+    <div class="stat-grid">
+      <div class="stat accent"><div class="num">${s.total}</div><div class="lbl">Workouts</div></div>
+      <div class="stat"><div class="num">${s.thisWeek}</div><div class="lbl">This week</div></div>
+      <div class="stat blue"><div class="num">${s.streak}</div><div class="lbl">Day streak</div></div>
+      <div class="stat"><div class="num">${fmtVol(s.totalVol)}</div><div class="lbl">Total ${settings.unit} lifted</div></div>
+      <div class="stat wide"><div class="num">${fmtDuration(s.totalTime)}</div><div class="lbl">Total time trained</div></div>
+    </div>
+
+    ${topProg}
+    ${tabBar('home')}
+  `;
+
+  $('[data-settings]').addEventListener('click', openSettings);
+  $('[data-timer]').addEventListener('click', startStandaloneTimer);
+  $('[data-profiles]').addEventListener('click', renderProfiles);
+  document.querySelectorAll('[data-start]').forEach((b) =>
+    b.addEventListener('click', () => startWorkout(b.dataset.start)));
+  const resumeBtn = $('[data-resume]');
+  if (resumeBtn) resumeBtn.addEventListener('click', () => renderWorkout());
+  wireTabs();
+  syncWake();
+}
+
+/* ================================================================== *
+ * TAB: Workout (idle) — pick a day to start
+ * ================================================================== */
+function renderStartWorkout() {
+  document.getElementById('app').innerHTML = `
+    <header class="app-header"><h1>Start a workout</h1></header>
+    ${dayCardsHtml()}
+    <button class="btn btn-ghost btn-block mt8" data-customize>✎ Customize plan</button>
+    ${tabBar('workout')}
+  `;
+  document.querySelectorAll('[data-start]').forEach((b) =>
+    b.addEventListener('click', () => startWorkout(b.dataset.start)));
+  document.querySelectorAll('[data-editday]').forEach((b) =>
+    b.addEventListener('click', () => renderDayEditor(b.dataset.editday)));
+  $('[data-customize]').addEventListener('click', renderPlanPicker);
+  wireTabs();
+  syncWake();
+}
+
+/* ================================================================== *
+ * TAB: History — recent sessions + progress charts
+ * ================================================================== */
+function renderHistory() {
+  const recent = history.map((h) => `
     <button class="hist-item" data-editsession="${h.id}">
       <div>
         <div class="h-day">${escapeHtml(userPlan.days[h.dayId] ? userPlan.days[h.dayId].name : h.dayName || 'Workout')}</div>
@@ -525,27 +639,6 @@ function renderHome() {
       </div>
     </button>`).join('');
 
-  const bestsHtml = bestNames.length ? bestNames.map((n) => `
-      <div class="pb-row">
-        <span class="pb-name">${escapeHtml(n)}</span>
-        <span class="pb-val">${bests[n].weight} <small>${settings.unit} × ${escapeHtml(String(bests[n].reps || '—'))}</small></span>
-      </div>`).join('') : '';
-
-  // Ready-to-progress cards
-  const progs = allProgressions();
-  const progHtml = progs.length ? `
-    <div class="section-title">Ready to progress</div>
-    ${progs.map((p) => `
-      <div class="prog-card">
-        <div class="prog-i">⬆</div>
-        <div class="prog-main">
-          <div class="prog-name">${escapeHtml(p.name)}</div>
-          <div class="prog-detail">${escapeHtml(p.detail)}</div>
-        </div>
-        <div class="prog-next">${escapeHtml(p.label)}</div>
-      </div>`).join('')}` : '';
-
-  // Progress charts
   const chartable = chartableExercises();
   if (chartEx == null || !chartable.includes(chartEx)) chartEx = chartable[0] || null;
   const volSeries = volumeSeries(10);
@@ -567,66 +660,72 @@ function renderHome() {
     </div>` : ''}` : '';
 
   document.getElementById('app').innerHTML = `
-    <header class="app-header">
-      <h1><span class="logo">${LOGO_SVG}</span> Lift Tracker</h1>
-      <div class="header-actions">
-        <button class="icon-btn profile-chip" data-profiles aria-label="Profiles">${escapeHtml((currentProfile().name[0] || '?').toUpperCase())}</button>
-        <button class="icon-btn" data-timer aria-label="Rest timer">⏱</button>
-        <button class="icon-btn" data-settings aria-label="Settings">⚙</button>
-      </div>
-    </header>
-
-    ${resumeHtml}
-    ${heroHtml}
-    ${currentProfile().conditions ? `<div class="cond-note"><b>Note:</b> ${escapeHtml(currentProfile().conditions)} — train accordingly and follow your clinician's advice.</div>` : ''}
-
-    <div class="stat-grid">
-      <div class="stat accent"><div class="num">${s.total}</div><div class="lbl">Workouts</div></div>
-      <div class="stat"><div class="num">${s.thisWeek}</div><div class="lbl">This week</div></div>
-      <div class="stat blue"><div class="num">${s.streak}</div><div class="lbl">Day streak</div></div>
-      <div class="stat"><div class="num">${fmtVol(s.totalVol)}</div><div class="lbl">Total ${settings.unit} lifted</div></div>
-      <div class="stat wide"><div class="num">${fmtDuration(s.totalTime)}</div><div class="lbl">Total time trained</div></div>
-    </div>
-
-    ${progHtml}
-
-    <div class="section-title">Start a workout</div>
-    ${dayCards}
-    <button class="btn btn-ghost btn-block mt8" data-customize>✎ Customize exercises</button>
-
+    <header class="app-header"><h1>History</h1></header>
     ${chartsHtml}
-
     <div class="section-title">Recent sessions</div>
-    ${recent || '<div class="empty">No workouts logged yet. Pick a day above to start.</div>'}
-
-    ${bestNames.length ? `<div class="section-title">Personal bests</div><div class="stat" style="padding:6px 16px">${bestsHtml}</div>` : ''}
-
-    <p class="center muted mt16" style="font-size:12px">Data is saved on this device only.</p>
+    ${recent || '<div class="empty">No workouts logged yet. Start one from the Workout tab.</div>'}
+    ${tabBar('history')}
   `;
 
-  // wire up
-  $('[data-settings]').addEventListener('click', openSettings);
-  $('[data-timer]').addEventListener('click', startStandaloneTimer);
-  $('[data-profiles]').addEventListener('click', renderProfiles);
-  document.querySelectorAll('[data-start]').forEach((b) =>
-    b.addEventListener('click', () => startWorkout(b.dataset.start)));
-  document.querySelectorAll('[data-editday]').forEach((b) =>
-    b.addEventListener('click', () => renderDayEditor(b.dataset.editday)));
   document.querySelectorAll('[data-editsession]').forEach((b) =>
     b.addEventListener('click', () => renderSessionEditor(b.dataset.editsession)));
-  $('[data-customize]').addEventListener('click', renderPlanPicker);
-  const resumeBtn = $('[data-resume]');
-  if (resumeBtn) resumeBtn.addEventListener('click', () => renderWorkout());
-
-  // progress line-chart exercise selector — swap just the chart body
   const sel = $('#chart-ex');
   if (sel) sel.addEventListener('change', () => {
     chartEx = sel.value;
     $('#chart-ex-body').innerHTML = svgLineChart(exerciseSeries(chartEx));
     $('#chart-ex-label').textContent = metricLabel(chartEx);
   });
+  wireTabs();
+  syncWake();
+}
 
-  syncWake();   // not on the workout screen → release any screen lock
+/* ================================================================== *
+ * TAB: You — profile, all progressions, personal bests, settings
+ * ================================================================== */
+function renderYou() {
+  const p = currentProfile();
+  const bests = personalBests();
+  const bestNames = Object.keys(bests);
+  const bestsHtml = bestNames.length ? bestNames.map((n) => `
+      <div class="pb-row">
+        <span class="pb-name">${escapeHtml(n)}</span>
+        <span class="pb-val">${bests[n].weight} <small>${settings.unit} × ${escapeHtml(String(bests[n].reps || '—'))}</small></span>
+      </div>`).join('') : '';
+
+  const progs = allProgressions();
+  const progHtml = progs.length ? `
+    <div class="section-title">Ready to progress</div>
+    ${progs.map(progCardHtml).join('')}` : '';
+
+  document.getElementById('app').innerHTML = `
+    <header class="app-header"><h1>You</h1></header>
+
+    <div class="stat" style="text-align:left;padding:16px;display:flex;align-items:center;gap:14px">
+      <span class="profile-chip" style="width:48px;height:48px;font-size:20px;flex:0 0 auto">${escapeHtml((p.name[0] || '?').toUpperCase())}</span>
+      <span>
+        <div style="font-family:var(--ff-display);font-weight:700;font-size:18px">${escapeHtml(p.name)}</div>
+        <div class="muted" style="font-size:13px">${escapeHtml(p.goal || '')}${(p.protect && p.protect.length) ? ' · protecting ' + escapeHtml(p.protect.join(', ')) : ''}</div>
+      </span>
+    </div>
+
+    ${progHtml}
+
+    ${bestNames.length ? `<div class="section-title">Personal bests</div><div class="stat" style="padding:6px 16px">${bestsHtml}</div>` : ''}
+
+    <div class="section-title">Settings</div>
+    <button class="btn btn-ghost btn-block" data-customize>✎ Customize plan</button>
+    <button class="btn btn-ghost btn-block mt8" data-profiles>Profiles</button>
+    <button class="btn btn-ghost btn-block mt8" data-settings>Preferences — theme, units, sounds…</button>
+
+    <p class="center muted mt16" style="font-size:12px">Data is saved on this device only.</p>
+    ${tabBar('you')}
+  `;
+
+  $('[data-customize]').addEventListener('click', renderPlanPicker);
+  $('[data-profiles]').addEventListener('click', renderProfiles);
+  $('[data-settings]').addEventListener('click', openSettings);
+  wireTabs();
+  syncWake();
 }
 
 /* ================================================================== *
@@ -754,11 +853,15 @@ function renderWorkout() {
         <button class="set-check ${set.done ? 'on' : ''}" data-check aria-label="Complete set ${si + 1}">✓</button>
         <button class="set-del" data-delset aria-label="Delete set ${si + 1}">✕</button>
       </div>
-      <div class="feel ${set.done ? 'shown' : ''}" data-ex="${ei}" data-set="${si}">
-        <span class="feel-lbl">Felt</span>
-        <button class="feel-btn ${set.feel === 'easy' ? 'on' : ''}" data-feel="easy" aria-label="Felt easy">🟢 Easy</button>
-        <button class="feel-btn ${set.feel === 'ok' ? 'on' : ''}" data-feel="ok" aria-label="Just right">🔵 Just right</button>
-        <button class="feel-btn ${set.feel === 'pain' ? 'on' : ''}" data-feel="pain" aria-label="Hard or pain">🔴 Hard / pain</button>
+      <div class="felt" data-ex="${ei}" data-set="${si}"${set.done ? '' : ' style="display:none"'}>
+        <div class="felt-q">How did it feel?</div>
+        <div class="seg3">
+          <button class="s3 easy ${set.feel === 'easy' ? 'on' : ''}" data-feel="easy">Easy</button>
+          <button class="s3 ok ${set.feel === 'ok' ? 'on' : ''}" data-feel="ok">Just right</button>
+          <button class="s3 hard ${set.feel === 'hard' ? 'on' : ''}" data-feel="hard">Hard</button>
+        </div>
+        ${settings.recordPain ? `<div class="felt-q">Any pain?</div>
+        <button class="painflag ${set.pain ? 'on' : ''}" data-pain><span class="dotx"></span> ${set.pain ? 'Pain flagged' : 'Flag pain'}</button>` : ''}
       </div>`).join('');
 
     return `
@@ -920,16 +1023,28 @@ function wireWorkout() {
   document.querySelectorAll('[data-check]').forEach((b) =>
     b.addEventListener('click', onCheck));
 
-  // per-set "how did it feel?" tags (tap again to clear)
-  document.querySelectorAll('.feel-btn').forEach((b) =>
+  // per-set effort ladder — Easy / Just right / Hard (tap again to clear)
+  document.querySelectorAll('.felt .s3').forEach((b) =>
     b.addEventListener('click', (e) => {
-      const wrap = e.target.closest('.feel');
+      const wrap = e.target.closest('.felt');
       const ei = num(wrap.dataset.ex), si = num(wrap.dataset.set);
       const val = e.target.dataset.feel;
       const set = active.exercises[ei].sets[si];
       set.feel = (set.feel === val ? '' : val);
       save(KEY.active, active);
-      wrap.querySelectorAll('.feel-btn').forEach((x) => x.classList.toggle('on', x.dataset.feel === set.feel));
+      wrap.querySelectorAll('.s3').forEach((x) => x.classList.toggle('on', x.dataset.feel === set.feel));
+    }));
+
+  // optional pain flag (separate from the effort ladder; shown only when enabled)
+  document.querySelectorAll('.felt [data-pain]').forEach((b) =>
+    b.addEventListener('click', (e) => {
+      const wrap = e.target.closest('.felt');
+      const ei = num(wrap.dataset.ex), si = num(wrap.dataset.set);
+      const set = active.exercises[ei].sets[si];
+      set.pain = !set.pain;
+      save(KEY.active, active);
+      b.classList.toggle('on', set.pain);
+      b.innerHTML = `<span class="dotx"></span> ${set.pain ? 'Pain flagged' : 'Flag pain'}`;
     }));
 
   // add set
@@ -1036,7 +1151,7 @@ function onCheck(e) {
 
   // reveal the "how did it feel?" tags once the set is marked done
   const feelEl = row.nextElementSibling;
-  if (feelEl && feelEl.classList.contains('feel')) feelEl.classList.toggle('shown', set.done);
+  if (feelEl && feelEl.classList.contains('felt')) feelEl.style.display = set.done ? '' : 'none';
 
   // mark exercise done-all styling
   const exEl = row.closest('.exercise');
@@ -2104,6 +2219,18 @@ function openSettings() {
       </div>
     </div>
 
+    <div class="section-title">Appearance</div>
+    <div class="stat" style="padding:4px 16px">
+      <div class="settings-row">
+        <div><div class="sr-label">Theme</div><div class="sr-sub">Match your device, or force light / dark</div></div>
+        <div class="rest-chips">
+          <button class="chip ${settings.theme === 'system' ? 'active' : ''}" data-theme-opt="system">System</button>
+          <button class="chip ${settings.theme === 'light' ? 'active' : ''}" data-theme-opt="light">Light</button>
+          <button class="chip ${settings.theme === 'dark' ? 'active' : ''}" data-theme-opt="dark">Dark</button>
+        </div>
+      </div>
+    </div>
+
     <div class="section-title">Rest timer</div>
     <div class="stat" style="padding:4px 16px">
       <div class="settings-row">
@@ -2132,6 +2259,14 @@ function openSettings() {
       </div>
     </div>
 
+    <div class="section-title">Effort &amp; pain</div>
+    <div class="stat" style="padding:4px 16px">
+      <div class="settings-row">
+        <div><div class="sr-label">Record pain</div><div class="sr-sub">Adds a "Flag pain" button to each set; a flag holds progression. A coach can set this for a client.</div></div>
+        <button class="toggle ${settings.recordPain ? 'on' : ''}" id="set-pain" role="switch" aria-checked="${settings.recordPain}"></button>
+      </div>
+    </div>
+
     <div class="section-title">Units</div>
     <div class="stat" style="padding:4px 16px">
       <div class="settings-row">
@@ -2155,7 +2290,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v18 · data stored on this device</p>`;
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v21 · data stored on this device</p>`;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
   $('#set-profiles').addEventListener('click', renderProfiles);
@@ -2186,6 +2321,14 @@ function openSettings() {
     b.addEventListener('click', () => {
       settings.unit = b.dataset.unit; save(KEY.settings, settings); openSettings();
     }));
+  document.querySelectorAll('[data-theme-opt]').forEach((b) =>
+    b.addEventListener('click', () => {
+      settings.theme = b.dataset.themeOpt; save(KEY.settings, settings); applyTheme(); openSettings();
+    }));
+  $('#set-pain').addEventListener('click', (e) => {
+    settings.recordPain = !settings.recordPain; e.target.classList.toggle('on', settings.recordPain);
+    save(KEY.settings, settings);
+  });
   $('#set-export').addEventListener('click', exportData);
   $('#set-reset').addEventListener('click', (e) => armThen(e.target, 'Tap again to erase', () => {
     [KEY.history, KEY.active, KEY.last, KEY.settings, KEY.plan, KEY.warmup].forEach((k) => localStorage.removeItem(k));
@@ -2211,11 +2354,11 @@ function exportData() {
  * Boot
  * ================================================================== */
 const LOGO_SVG = `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect x="1" y="9" width="3" height="6" rx="1" fill="#10a06a"/>
-  <rect x="20" y="9" width="3" height="6" rx="1" fill="#10a06a"/>
-  <rect x="4" y="7" width="3" height="10" rx="1" fill="#10a06a"/>
-  <rect x="17" y="7" width="3" height="10" rx="1" fill="#10a06a"/>
-  <rect x="7" y="11" width="10" height="2" rx="1" fill="#10a06a"/>
+  <rect x="1" y="9" width="3" height="6" rx="1" fill="currentColor"/>
+  <rect x="20" y="9" width="3" height="6" rx="1" fill="currentColor"/>
+  <rect x="4" y="7" width="3" height="10" rx="1" fill="currentColor"/>
+  <rect x="17" y="7" width="3" height="10" rx="1" fill="currentColor"/>
+  <rect x="7" y="11" width="10" height="2" rx="1" fill="currentColor"/>
 </svg>`;
 
 // First-run setup for a new profile; otherwise restore mid-workout or home.
