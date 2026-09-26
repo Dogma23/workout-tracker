@@ -622,7 +622,10 @@ function renderHome() {
     </header>
 
     ${resumeHtml}
-    <div class="hero">
+    <div class="section-title" style="margin-top:0">Your stats</div>
+    ${statGridHtml()}
+
+    <div class="hero" style="margin-top:24px">
       <div class="hero-date">${new Date().toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}</div>
       <h2 class="hero-title">Choose today's <span>workout</span></h2>
       ${sug ? `<p class="hero-sub">Suggested: <b>${escapeHtml(sug.name)}</b> — the day you trained least recently. Tap any day to start.</p>` : ''}
@@ -631,9 +634,6 @@ function renderHome() {
 
     ${dayCardsHtml(active ? null : sugId)}
     <button class="btn btn-ghost btn-block mt8" data-customize>✎ Customize plan</button>
-
-    <div class="section-title">Your stats</div>
-    ${statGridHtml()}
     ${tabBar('home')}
   `;
 
@@ -2403,7 +2403,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v24 · data stored on this device</p>`;
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v25 · data stored on this device</p>`;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
   $('#set-profiles').addEventListener('click', renderProfiles);
