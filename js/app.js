@@ -860,7 +860,8 @@ function renderWorkout() {
           <button class="s3 ok ${set.feel === 'ok' ? 'on' : ''}" data-feel="ok">Just right</button>
           <button class="s3 hard ${set.feel === 'hard' ? 'on' : ''}" data-feel="hard">Hard</button>
         </div>
-        ${settings.recordPain ? `<button class="painflag ${set.pain ? 'on' : ''}" data-pain><span class="dotx"></span> ${set.pain ? 'Pain flagged' : 'Flag pain'}</button>` : ''}
+        ${settings.recordPain ? `<div class="felt-q">Any pain?</div>
+        <button class="painflag ${set.pain ? 'on' : ''}" data-pain><span class="dotx"></span> ${set.pain ? 'Pain flagged' : 'Flag pain'}</button>` : ''}
       </div>`).join('');
 
     return `
@@ -2289,7 +2290,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v20 · data stored on this device</p>`;
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v21 · data stored on this device</p>`;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
   $('#set-profiles').addEventListener('click', renderProfiles);

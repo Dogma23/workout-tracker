@@ -677,14 +677,15 @@ body:has(.tabbar) #app { padding-bottom: calc(88px + var(--safe-bottom)); }
 :root[data-theme="dark"] .s3.on.hard { color: #2a1c02; }
 
 .painflag {
-  align-self: center;
-  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  align-self: stretch;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
   border: 1px solid var(--line-strong);
   background: var(--bg-elev-2);
   color: var(--text-dim);
   font-family: var(--ff-body); font-size: 13px; font-weight: 600;
   padding: 8px 12px; border-radius: var(--r-tag);
 }
+.seg3 + .felt-q { margin-top: 8px; }   /* separate "Any pain?" from the effort ladder */
 .painflag.on { border-color: var(--feel-pain); color: var(--feel-pain); background: var(--warn-tint); }
 .painflag .dotx { width: 9px; height: 9px; border-radius: 50%; background: var(--feel-pain); }
 .painnote { font-family: var(--ff-body); font-size: 11px; color: var(--text-faint); }
