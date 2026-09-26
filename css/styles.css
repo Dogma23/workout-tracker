@@ -1097,6 +1097,15 @@ button.you-av { padding: 0; }
 .avp-item:active { transform: scale(.94); }
 .avp-item.on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
 label.btn { cursor: pointer; }
+/* backup reminder on Home */
+.backup-note {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  background: var(--warn-tint); border: 1px solid var(--warn-line);
+  border-radius: var(--r-card); padding: 16px; margin-bottom: 16px;
+}
+.backup-note b { color: var(--text); }
+.backup-note .btn { flex: 0 0 auto; min-height: 40px; }
+
 .text-btn {
   background: none; border: none; padding: 0; cursor: pointer;
   font-family: var(--ff-body); font-size: 14px; font-weight: 700; color: var(--accent);

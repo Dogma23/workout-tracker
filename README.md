@@ -28,7 +28,8 @@ screen (it's a PWA). No accounts, no server — your data lives on your device.
 - **Edit past workouts** — tap any recent session to fix a logged weight or rep, toggle whether a set counts, or delete the session. Volume and stats update automatically.
 - **Pre / post-workout segments with timers** — each training day has a **Pre-workout** and a **Post-workout** segment, and you choose the *type* of each: **Warm-up**, **Stretch**, **Cardio**, or **None**. Picking a type sets the segment up with sensible defaults (which you can then edit). Every move has a name and a duration in seconds (e.g. 30s), and during the workout each move shows a **▶ timer** you tap to run its countdown (same beeps as the rest timer). Edit per day in the day editor — pick the type, then add / rename / reorder / delete moves and set each one's seconds. Switching a type only auto-loads defaults when you haven't customised the list, so your edits are never lost.
 - **Offline-first PWA** — add to home screen; it runs with no signal in the gym.
-- **Your data, exportable** — everything is stored locally; export to JSON from Settings.
+- **Your data, backed up** — everything is stored on your device. Settings → **Back up now** saves a copy to Files / iCloud / email via the share sheet, and **Restore from backup** brings it back (history is merged, so restoring never deletes anything). Home reminds you if you haven't backed up in a week. ⚠️ On iPhone, deleting the home-screen icon deletes the app's data — back up first.
+- **Updates itself** — the app checks for a new version whenever you open it and loads it automatically; no need to remove and re-add the icon.
 
 ## Run it locally
 

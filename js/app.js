@@ -582,6 +582,12 @@ function progCardHtml(p) {
       </div>`;
 }
 
+// Nudge a backup once there's something worth losing and it's been a week.
+function backupDue() {
+  if (history.length < 3) return false;
+  return !settings.lastBackupAt || Date.now() - settings.lastBackupAt > 7 * 864e5;
+}
+
 function statGridHtml() {
   const s = stats();
   return `
@@ -622,6 +628,7 @@ function renderHome() {
     </header>
 
     ${resumeHtml}
+    ${backupDue() ? `<div class="backup-note"><div><b>Back up your workouts</b><div class="sr-sub">They only live on this phone. Save a copy to Files or iCloud.</div></div><button class="btn btn-ghost" data-backup>Back up</button></div>` : ''}
     <div class="section-title" style="margin-top:0">Your stats</div>
     ${statGridHtml()}
 
@@ -645,6 +652,8 @@ function renderHome() {
   document.querySelectorAll('[data-editday]').forEach((b) =>
     b.addEventListener('click', () => renderDayEditor(b.dataset.editday)));
   $('[data-customize]').addEventListener('click', renderPlanPicker);
+  const backupBtn = $('[data-backup]');
+  if (backupBtn) backupBtn.addEventListener('click', async () => { await exportData(); renderHome(); });
   const resumeBtn = $('[data-resume]');
   if (resumeBtn) resumeBtn.addEventListener('click', () => renderWorkout());
   wireTabs();
@@ -2394,16 +2403,22 @@ function openSettings() {
     <div class="section-title">Data</div>
     <div class="stat" style="padding:4px 16px">
       <div class="settings-row">
-        <div><div class="sr-label">Export data</div><div class="sr-sub">Download your history as JSON</div></div>
-        <button class="btn btn-ghost" id="set-export">Export</button>
+        <div><div class="sr-label">Back up now</div><div class="sr-sub">Save a copy to Files, iCloud or email · Last backup: ${settings.lastBackupAt ? fmtDate(settings.lastBackupAt) : 'never'}</div></div>
+        <button class="btn btn-ghost" id="set-export">Back up</button>
       </div>
+      <div class="settings-row">
+        <div><div class="sr-label">Restore from backup</div><div class="sr-sub">Adds the workouts from a backup file — nothing already here is removed</div></div>
+        <label class="btn btn-ghost" for="set-import-file">Restore</label>
+        <input type="file" id="set-import-file" accept="application/json,.json" hidden />
+      </div>
+      <p class="sr-sub" style="margin:8px 0 12px">On iPhone, deleting the home-screen icon also deletes this app's data. Back up before removing it.</p>
       <div class="settings-row">
         <div><div class="sr-label">Reset this profile</div><div class="sr-sub">Clears ${escapeHtml(currentProfile().name)}'s workouts &amp; plan</div></div>
         <button class="btn btn-danger" id="set-reset">Reset</button>
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v25 · data stored on this device</p>`;
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v26 · data stored on this device</p>`;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
   $('#set-profiles').addEventListener('click', renderProfiles);
@@ -2443,6 +2458,10 @@ function openSettings() {
     save(KEY.settings, settings);
   });
   $('#set-export').addEventListener('click', exportData);
+  $('#set-import-file').addEventListener('change', (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (f) importData(f);
+  });
   $('#set-reset').addEventListener('click', (e) => armThen(e.target, 'Tap again to erase', () => {
     [KEY.history, KEY.active, KEY.last, KEY.settings, KEY.plan, KEY.warmup].forEach((k) => localStorage.removeItem(k));
     loadProfileState();
@@ -2451,16 +2470,69 @@ function openSettings() {
   }));
 }
 
-function exportData() {
-  const blob = new Blob([JSON.stringify({ profile: currentProfile(), history, last, settings, plan: userPlan, exportedAt: new Date().toISOString() }, null, 2)],
-    { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
+// Back up everything for this profile as a JSON file. On phones, use the
+// share sheet so it can be saved to Files / iCloud / sent by email; elsewhere,
+// fall back to a download.
+async function exportData() {
+  const stamp = new Date().toISOString().slice(0, 10);
+  const json = JSON.stringify({ app: 'lift-tracker', version: 1, profile: currentProfile(), history, last, settings, plan: userPlan, exportedAt: new Date().toISOString() }, null, 2);
+  const name = `lift-tracker-backup-${stamp}.json`;
+  const markDone = () => { settings.lastBackupAt = Date.now(); save(KEY.settings, settings); };
+  try {
+    const file = new File([json], name, { type: 'application/json' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'Lift Tracker backup' });
+      markDone();
+      toast('Backup saved');
+      if (document.getElementById('set-export')) openSettings();
+      return;
+    }
+  } catch (err) {
+    if (err && err.name === 'AbortError') return;   // user cancelled the share sheet
+  }
+  const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
   const a = document.createElement('a');
-  a.href = url;
-  a.download = `lift-tracker-${new Date().toISOString().slice(0, 10)}.json`;
+  a.href = url; a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  toast('Exported');
+  markDone();
+  toast('Backup downloaded');
+  if (document.getElementById('set-export')) openSettings();
+}
+
+// Restore from a backup file. History is MERGED (by session id), so restoring
+// never deletes workouts that are already on the phone. Plan, settings,
+// last-used weights and profile details come back from the backup.
+function importData(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    let data;
+    try { data = JSON.parse(reader.result); } catch (e) { toast("That file isn't a Lift Tracker backup"); return; }
+    if (!data || (!Array.isArray(data.history) && !data.plan)) { toast("That file isn't a Lift Tracker backup"); return; }
+    const byId = new Map();
+    [...(data.history || []), ...history].forEach((h) => { if (h && h.id) byId.set(h.id, h); });
+    const before = history.length;
+    history = [...byId.values()].sort((a, b) => (b.date || 0) - (a.date || 0));
+    if (data.plan && data.plan.days && data.plan.order) userPlan = data.plan;
+    last = Object.assign({}, data.last || {}, last);
+    settings = Object.assign({}, DEFAULT_SETTINGS, data.settings || {}, { lastBackupAt: settings.lastBackupAt });
+    if (data.profile) {
+      const p = currentProfile();
+      ['name', 'goal', 'experience', 'days', 'equipment', 'protect', 'conditions', 'avatar'].forEach((k) => {
+        if (data.profile[k] !== undefined) p[k] = data.profile[k];
+      });
+      p.onboarded = true;
+      saveProfiles();
+    }
+    ensureRoutines();
+    save(KEY.history, history); savePlan(); save(KEY.last, last); save(KEY.settings, settings);
+    applyTheme();
+    const added = history.length - before;
+    toast(`Restored · ${added} workout${added === 1 ? '' : 's'} added`, 3200);
+    renderHome();
+  };
+  reader.onerror = () => toast("Couldn't read that file");
+  reader.readAsText(file);
 }
 
 /* ================================================================== *
@@ -2493,7 +2565,29 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-// Register service worker for offline use (ignored on file://).
+// Register the service worker for offline use (ignored on file://) and keep
+// the app current: check for a new version on launch and whenever the app is
+// brought back to the foreground; when a new version takes over, reload once
+// (workout progress is saved, so nothing is lost).
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloading) return;
+    reloading = true;
+    location.reload();
+  });
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').then((reg) => {
+      reg.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reg.update().catch(() => {});
+      });
+    }).catch(() => {});
+  });
 }
+
+// Ask the browser to keep this app's storage permanently (not evicted under
+// storage pressure). Harmless if unsupported or declined.
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+

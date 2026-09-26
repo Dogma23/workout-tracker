@@ -1,6 +1,10 @@
-/* Service worker — caches the app shell so it works offline in the gym.
-   Bump CACHE when you change any file so clients pull the new version. */
-const CACHE = 'lift-tracker-v25';
+/* Service worker — keeps the app working offline in the gym, WITHOUT pinning
+   people to an old version.
+
+   Strategy: NETWORK-FIRST for our own files. When online you always get the
+   latest app (and the cache is refreshed); when offline the cached copy is
+   used. Bump CACHE on each release so old caches are cleaned up. */
+const CACHE = 'lift-tracker-v26';
 const ASSETS = [
   './',
   './index.html',
@@ -13,7 +17,12 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  // cache: 'reload' bypasses the HTTP cache so a fresh copy is stored.
+  e.waitUntil(
+    caches.open(CACHE)
+      .then((c) => c.addAll(ASSETS.map((u) => new Request(u, { cache: 'reload' }))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (e) => {
@@ -24,14 +33,22 @@ self.addEventListener('activate', (e) => {
   );
 });
 
-// Cache-first for our own assets, network fallback otherwise.
 self.addEventListener('fetch', (e) => {
-  if (e.request.method !== 'GET') return;
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  if (new URL(req.url).origin !== self.location.origin) return;   // fonts etc.
+
   e.respondWith(
-    caches.match(e.request).then((hit) => hit || fetch(e.request).then((res) => {
-      const copy = res.clone();
-      caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
-      return res;
-    }).catch(() => caches.match('./index.html')))
+    fetch(req, { cache: 'no-cache' })
+      .then((res) => {
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+        }
+        return res;
+      })
+      .catch(() =>
+        caches.match(req, { ignoreSearch: true }).then((hit) =>
+          hit || (req.mode === 'navigate' ? caches.match('./index.html') : undefined)))
   );
 });
