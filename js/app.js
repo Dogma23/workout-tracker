@@ -71,9 +71,24 @@ const currentProfile = () => profiles.list.find((p) => p.id === profiles.current
 
 // Avatar: the profile photo if one was added, otherwise the first initial.
 const initialOf = (p) => escapeHtml(((p && p.name) || '?').trim().charAt(0).toUpperCase() || '?');
-const avatarInner = (p) => (p && p.avatar)
-  ? `<img class="av-img" src="${p.avatar}" alt="">`
-  : initialOf(p);
+// Built-in avatar library — emoji on a tinted circle. Stored as "emoji:<e>|<hex>"
+// (a few bytes), so it works offline with no image files.
+const AVATAR_LIBRARY = [
+  ['🏋️', '#3f86d6'], ['💪', '#e8720c'], ['🦁', '#d4a017'], ['🐺', '#6b7c93'],
+  ['🦅', '#8a5a2b'], ['🐻', '#7b4f2c'], ['🔥', '#e5484d'], ['⚡', '#f5b700'],
+  ['🥊', '#c0392b'], ['🏃', '#1f9d57'], ['🧘', '#8e6cef'], ['🚴', '#0ea5a4'],
+  ['🦍', '#4b5563'], ['🐯', '#f08c00'], ['🦊', '#e8590c'], ['🐼', '#374151'],
+];
+const emojiAvatar = (e, c) => `emoji:${e}|${c}`;
+const avatarInner = (p) => {
+  const a = p && p.avatar;
+  if (!a) return initialOf(p);
+  if (a.startsWith('emoji:')) {
+    const [e, c] = a.slice(6).split('|');
+    return `<span class="av-emoji" style="background:${c}33">${e}</span>`;
+  }
+  return `<img class="av-img" src="${a}" alt="">`;
+};
 
 // Shrink a chosen photo to a small centre-cropped square JPEG so it fits
 // comfortably in localStorage (~15–30 KB).
@@ -567,6 +582,18 @@ function progCardHtml(p) {
       </div>`;
 }
 
+function statGridHtml() {
+  const s = stats();
+  return `
+    <div class="stat-grid">
+      <div class="stat accent"><div class="num">${s.total}</div><div class="lbl">Workouts</div></div>
+      <div class="stat"><div class="num">${s.thisWeek}</div><div class="lbl">This week</div></div>
+      <div class="stat blue"><div class="num">${s.streak}</div><div class="lbl">Day streak</div></div>
+      <div class="stat"><div class="num">${fmtVol(s.totalVol)}</div><div class="lbl">Total ${settings.unit} lifted</div></div>
+      <div class="stat wide"><div class="num">${fmtDuration(s.totalTime)}</div><div class="lbl">Total time trained</div></div>
+    </div>`;
+}
+
 /* ================================================================== *
  * TAB: Home — choose today's workout (all days listed, suggested tagged)
  * ================================================================== */
@@ -604,6 +631,9 @@ function renderHome() {
 
     ${dayCardsHtml(active ? null : sugId)}
     <button class="btn btn-ghost btn-block mt8" data-customize>✎ Customize plan</button>
+
+    <div class="section-title">Your stats</div>
+    ${statGridHtml()}
     ${tabBar('home')}
   `;
 
@@ -625,7 +655,6 @@ function renderHome() {
  * TAB: Progress — stats, ready-to-progress, charts
  * ================================================================== */
 function renderProgress() {
-  const s = stats();
   const bests = personalBests();
   const bestNames = Object.keys(bests);
   const bestsHtml = bestNames.length ? `<div class="section-title">Personal bests</div><div class="stat" style="padding:8px 16px">${bestNames.map((n) => `
@@ -642,7 +671,6 @@ function renderProgress() {
   if (chartEx == null || !chartable.includes(chartEx)) chartEx = chartable[0] || null;
   const volSeries = volumeSeries(10);
   const chartsHtml = history.length ? `
-    <div class="section-title">Charts</div>
     <div class="stat" style="padding:16px 16px 8px">
       <div class="chart-cap">Workout volume <span class="muted">· last ${volSeries.length} session${volSeries.length > 1 ? 's' : ''}</span></div>
       ${svgBarChart(volSeries)}
@@ -660,18 +688,9 @@ function renderProgress() {
 
   document.getElementById('app').innerHTML = `
     <header class="app-header"><h1>Progress</h1></header>
-
-    <div class="stat-grid">
-      <div class="stat accent"><div class="num">${s.total}</div><div class="lbl">Workouts</div></div>
-      <div class="stat"><div class="num">${s.thisWeek}</div><div class="lbl">This week</div></div>
-      <div class="stat blue"><div class="num">${s.streak}</div><div class="lbl">Day streak</div></div>
-      <div class="stat"><div class="num">${fmtVol(s.totalVol)}</div><div class="lbl">Total ${settings.unit} lifted</div></div>
-      <div class="stat wide"><div class="num">${fmtDuration(s.totalTime)}</div><div class="lbl">Total time trained</div></div>
-    </div>
-
+    ${chartsHtml}
     ${progHtml}
     ${bestsHtml}
-    ${chartsHtml}
     ${tabBar('progress')}
   `;
 
@@ -728,13 +747,12 @@ function renderYou() {
     <header class="app-header"><h1>You</h1></header>
 
     <div class="you-card">
-      <label class="you-av" for="av-file" title="Change photo">${avatarInner(p)}<span class="you-av-cam" aria-hidden="true">📷</span></label>
-      <input type="file" id="av-file" accept="image/*" hidden />
+      <button class="you-av" data-av-pick aria-label="Change avatar">${avatarInner(p)}<span class="you-av-cam" aria-hidden="true">✎</span></button>
       <div class="you-info">
         <div class="you-name">${escapeHtml(p.name)}</div>
         <div class="you-sub">${escapeHtml(p.goal || '')}${(p.protect && p.protect.length) ? ' · protecting ' + escapeHtml(p.protect.join(', ')) : ''}</div>
         <div class="you-av-actions">
-          <label class="text-btn" for="av-file">${p.avatar ? 'Change photo' : 'Add photo'}</label>
+          <button class="text-btn" data-av-pick>${p.avatar ? 'Change avatar' : 'Choose avatar'}</button>
           ${p.avatar ? '<button class="text-btn" data-av-remove>Remove</button>' : ''}
         </div>
       </div>
@@ -749,18 +767,7 @@ function renderYou() {
     ${tabBar('you')}
   `;
 
-  $('#av-file').addEventListener('change', async (e) => {
-    const file = e.target.files && e.target.files[0];
-    if (!file) return;
-    try {
-      p.avatar = await resizeAvatar(file);
-      saveProfiles();
-      toast('Photo updated');
-    } catch (err) {
-      toast("Couldn't read that image — try another photo");
-    }
-    renderYou();
-  });
+  document.querySelectorAll('[data-av-pick]').forEach((b) => b.addEventListener('click', renderAvatarPicker));
   const rm = $('[data-av-remove]');
   if (rm) rm.addEventListener('click', () => { delete p.avatar; saveProfiles(); toast('Photo removed'); renderYou(); });
   $('[data-customize]').addEventListener('click', renderPlanPicker);
@@ -768,6 +775,41 @@ function renderYou() {
   $('[data-settings]').addEventListener('click', openSettings);
   wireTabs();
   syncWake();
+}
+
+/* ================================================================== *
+ * Avatar picker — built-in library, photo upload, or initial
+ * ================================================================== */
+function renderAvatarPicker() {
+  const p = currentProfile();
+  const grid = AVATAR_LIBRARY.map(([e, c]) => {
+    const v = emojiAvatar(e, c);
+    return `<button class="avp-item ${p.avatar === v ? 'on' : ''}" data-av="${escapeHtml(v)}" style="background:${c}33" aria-label="Avatar ${e}">${e}</button>`;
+  }).join('');
+  document.getElementById('app').innerHTML = `
+    <header class="app-header">
+      <button class="icon-btn" data-back aria-label="Back">‹</button>
+      <div class="wk-head" style="flex:1"><div class="wk-title">Choose avatar</div></div>
+    </header>
+    <div class="avp-current"><span class="you-av">${avatarInner(p)}</span></div>
+    <div class="section-title">Pick one</div>
+    <div class="avp-grid">${grid}</div>
+    <div class="section-title">Or</div>
+    <label class="btn btn-ghost btn-block" for="av-file">📷 Upload a photo</label>
+    <input type="file" id="av-file" accept="image/*" hidden />
+    <button class="btn btn-ghost btn-block mt8" data-av-initial>Use my initial (${initialOf(p)})</button>
+  `;
+  const done = (msg) => { saveProfiles(); toast(msg); renderYou(); };
+  $('[data-back]').addEventListener('click', renderYou);
+  document.querySelectorAll('[data-av]').forEach((b) =>
+    b.addEventListener('click', () => { p.avatar = b.dataset.av; done('Avatar updated'); }));
+  $('[data-av-initial]').addEventListener('click', () => { delete p.avatar; done('Using your initial'); });
+  $('#av-file').addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    try { p.avatar = await resizeAvatar(file); done('Photo updated'); }
+    catch (err) { toast("Couldn't read that image — try another photo"); }
+  });
 }
 
 /* ================================================================== *
@@ -2332,7 +2374,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v22 · data stored on this device</p>`;
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v23 · data stored on this device</p>`;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
   $('#set-profiles').addEventListener('click', renderProfiles);

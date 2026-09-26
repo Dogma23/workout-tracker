@@ -1056,6 +1056,31 @@ body:has(.tabbar) #app { padding-bottom: calc(88px + var(--safe-bottom)); }
 .you-name { font-family: var(--ff-display); font-weight: 700; font-size: 20px; line-height: 1.2; }
 .you-sub { font-size: 13px; color: var(--text-dim); margin-top: 4px; }
 .you-av-actions { display: flex; gap: 16px; margin-top: 8px; }
+/* emoji avatars (built-in library) */
+.av-emoji {
+  width: 100%; height: 100%; border-radius: inherit;
+  display: flex; align-items: center; justify-content: center; line-height: 1;
+}
+.profile-chip .av-emoji { font-size: 22px; }
+.prof-av .av-emoji { font-size: 22px; }
+.you-av .av-emoji { font-size: 38px; }
+button.you-av { padding: 0; }
+
+/* avatar picker */
+.avp-current { display: flex; justify-content: center; margin: 8px 0 8px; }
+.avp-current .you-av { width: 96px; height: 96px; font-size: 40px; cursor: default; }
+.avp-current .you-av .av-emoji { font-size: 50px; }
+.avp-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.avp-item {
+  aspect-ratio: 1; width: 100%; max-width: 100%;
+  border-radius: 50%; border: 2px solid transparent;
+  font-size: 34px; line-height: 1; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: transform .08s ease;
+}
+.avp-item:active { transform: scale(.94); }
+.avp-item.on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+label.btn { cursor: pointer; }
 .text-btn {
   background: none; border: none; padding: 0; cursor: pointer;
   font-family: var(--ff-body); font-size: 14px; font-weight: 700; color: var(--accent);
