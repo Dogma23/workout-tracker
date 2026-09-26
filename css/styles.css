@@ -44,7 +44,7 @@
   /* feel (effort ladder) */
   --feel-easy: #1f9d57;
   --feel-ok: #2f80ed;
-  --feel-hard: #b9770e;
+  --feel-hard: #e8720c;
   --feel-pain: #d1493f;
 
   /* radius — CRISP (card/button 9 · input/cell 7 · chip/tag 8) */
@@ -94,7 +94,7 @@
     --danger: #f26060;
     --feel-easy: #48cc8c;
     --feel-ok: #5aa6f0;
-    --feel-hard: #f2a838;
+    --feel-hard: #ff8a3d;
     --feel-pain: #f26060;
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4);
     --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px rgba(0, 0, 0, .5);
@@ -125,7 +125,7 @@
   --danger: #f26060;
   --feel-easy: #48cc8c;
   --feel-ok: #5aa6f0;
-  --feel-hard: #f2a838;
+  --feel-hard: #ff8a3d;
   --feel-pain: #f26060;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4);
   --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px rgba(0, 0, 0, .5);
@@ -677,8 +677,8 @@ body:has(.tabbar) #app { padding-bottom: calc(88px + var(--safe-bottom)); }
 :root[data-theme="dark"] .s3.on.hard { color: #2a1c02; }
 
 .painflag {
-  align-self: flex-start;
-  display: inline-flex; align-items: center; gap: 8px;
+  align-self: center;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   border: 1px solid var(--line-strong);
   background: var(--bg-elev-2);
   color: var(--text-dim);

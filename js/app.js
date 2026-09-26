@@ -2289,7 +2289,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v19 · data stored on this device</p>`;
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v20 · data stored on this device</p>`;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
   $('#set-profiles').addEventListener('click', renderProfiles);
