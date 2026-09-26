@@ -1275,6 +1275,7 @@ function buildActiveEx(def) {
 // Library picker used mid-workout. 'add' saves to the plan; 'swap' is today-only
 // and opens pre-filtered to the same body part as the exercise being swapped.
 function renderSessionPicker(mode, ei) {
+  libTag = '';
   const title = mode === 'swap' ? 'Swap exercise' : 'Add exercise';
   const group = (mode === 'swap' && ei != null) ? groupForName(active.exercises[ei].name) : '';
   const initialQ = group;   // pre-filter swaps to the same muscle group
@@ -1291,18 +1292,14 @@ function renderSessionPicker(mode, ei) {
     </header>
     <input id="lib-search" class="lib-search" type="search" autocomplete="off"
            placeholder="Search ${EXERCISE_LIBRARY.length} exercises…" value="${escapeHtml(initialQ)}" />
+    <div class="lib-chips" id="lib-chips">${libChipsHtml()}</div>
     <p class="muted" style="font-size:12px;margin:0 2px 10px">${intro}${currentProfile().protect.length ? ' ⚠ marks moves that load a joint you’re protecting.' : ''}</p>
     <button class="btn btn-ghost btn-block" data-customex style="margin-bottom:12px">+ Add a custom exercise</button>
     <div id="lib-list">${libraryListHtml(initialQ)}</div>
   `;
   $('[data-back]').addEventListener('click', renderWorkout);
   $('[data-customex]').addEventListener('click', () => renderSessionCustom(mode, ei));
-  const search = $('#lib-search');
-  search.addEventListener('input', () => {
-    $('#lib-list').innerHTML = libraryListHtml(search.value);
-    bindLibraryPicks(onPick);
-  });
-  bindLibraryPicks(onPick);
+  wireLibrary(onPick);
 }
 
 function applySessionEx(mode, ei, def) {
@@ -1764,33 +1761,68 @@ function renderExerciseForm(dayId, idx, prefill) {
 /* ================================================================== *
  * EXERCISE LIBRARY PICKER — search a preloaded list, tap to pre-fill
  * ================================================================== */
+let libTag = '';   // active style/equipment chip in the library ('' = all)
+
 function libraryListHtml(q) {
   const query = q.trim().toLowerCase();
   // If the query is exactly a body-part name (e.g. the swap pre-fill), show ONLY
-  // that group. Otherwise do a loose search across name/group/notes.
+  // that group. Otherwise do a loose search across name/group/tags/notes.
   const exactGroup = LIBRARY_GROUPS.find((g) => g.toLowerCase() === query);
-  const match = (e) => exactGroup ? e.group === exactGroup
+  const tagOk = (e) => !libTag || (e.tags || []).includes(libTag);
+  const match = (e) => tagOk(e) && (exactGroup ? e.group === exactGroup
     : (!query || e.name.toLowerCase().includes(query)
-      || e.group.toLowerCase().includes(query) || (e.notes && e.notes.toLowerCase().includes(query)));
+      || e.group.toLowerCase().includes(query)
+      || (e.tags || []).some((t) => t.toLowerCase().includes(query))
+      || (e.notes && e.notes.toLowerCase().includes(query))));
   let html = '';
   LIBRARY_GROUPS.forEach((g) => {
     const items = EXERCISE_LIBRARY.filter((e) => e.group === g && match(e));
     if (!items.length) return;
-    html += `<div class="lib-group">${escapeHtml(g)}</div>`;
+    html += `<div class="lib-group">${escapeHtml(g)} <span class="lib-count">${items.length}</span></div>`;
     items.forEach((e) => {
       const i = EXERCISE_LIBRARY.indexOf(e);
       const c = cautionFor(e);
+      const tags = (e.tags || []).filter((t) => t !== 'Other');
       html += `
         <button class="lib-row" data-pick="${i}">
           <div class="lib-main">
             <div class="lib-name">${escapeHtml(e.name)}${c ? ' <span class="lib-warn">⚠</span>' : ''}</div>
-            <div class="lib-meta">${e.sets} × ${escapeHtml(e.reps)} · ${TRACK_LABELS[e.tracks]}${c ? ' · <span class="lib-caution">' + escapeHtml(c) + '</span>' : ''}</div>
+            <div class="lib-meta">${e.sets} × ${escapeHtml(e.reps)} · ${TRACK_LABELS[e.tracks]}${tags.length ? ' · ' + tags.map(escapeHtml).join(', ') : ''}${c ? ' · <span class="lib-caution">' + escapeHtml(c) + '</span>' : ''}</div>
           </div>
           <span class="chev">›</span>
         </button>`;
     });
   });
-  return html || '<div class="empty">No matches. Use “Add custom exercise” instead.</div>';
+  return html || '<div class="empty">No matches. Try another filter, or add a custom exercise.</div>';
+}
+
+// Style / equipment filter chips (All, Barbell, Cable, CrossFit, Hyrox…).
+function libChipsHtml() {
+  const count = (t) => EXERCISE_LIBRARY.filter((e) => (e.tags || []).includes(t)).length;
+  return `<button class="lib-chip ${!libTag ? 'on' : ''}" data-libtag="">All</button>`
+    + LIBRARY_TAGS.map((t) => `<button class="lib-chip ${libTag === t ? 'on' : ''}" data-libtag="${escapeHtml(t)}">${escapeHtml(t)} <span>${count(t)}</span></button>`).join('');
+}
+
+// Wire search + chips + rows for either library screen.
+function wireLibrary(onPick) {
+  const search = $('#lib-search');
+  const refresh = () => {
+    $('#lib-list').innerHTML = libraryListHtml(search.value);
+    bindLibraryPicks(onPick);
+  };
+  search.addEventListener('input', refresh);
+  const bindChips = () => document.querySelectorAll('[data-libtag]').forEach((b) =>
+    b.addEventListener('click', () => {
+      libTag = b.dataset.libtag;
+      const strip = $('#lib-chips');
+      const x = strip.scrollLeft;
+      strip.innerHTML = libChipsHtml();
+      strip.scrollLeft = x;   // keep the strip where the user left it
+      bindChips();
+      refresh();
+    }));
+  bindChips();
+  bindLibraryPicks(onPick);
 }
 
 // Bind [data-pick] rows to a callback that receives a *copy* of the library entry.
@@ -1800,6 +1832,7 @@ function bindLibraryPicks(onPick) {
 }
 
 function renderLibraryPicker(dayId, query = '') {
+  libTag = '';
   const onPick = (e) => renderExerciseForm(dayId, null, e);
   document.getElementById('app').innerHTML = `
     <header class="app-header">
@@ -1808,16 +1841,12 @@ function renderLibraryPicker(dayId, query = '') {
     </header>
     <input id="lib-search" class="lib-search" type="search" autocomplete="off"
            placeholder="Search ${EXERCISE_LIBRARY.length} exercises…" value="${escapeHtml(query)}" />
+    <div class="lib-chips" id="lib-chips">${libChipsHtml()}</div>
     <p class="muted" style="font-size:12px;margin:0 2px 12px">Tap one to add it to <b>${escapeHtml(userPlan.days[dayId].name)}</b>.${currentProfile().protect.length ? ' ⚠ marks moves that load a joint you’re protecting.' : ''}</p>
     <div id="lib-list">${libraryListHtml(query)}</div>
   `;
   $('[data-back]').addEventListener('click', () => renderDayEditor(dayId));
-  const search = $('#lib-search');
-  search.addEventListener('input', () => {
-    $('#lib-list').innerHTML = libraryListHtml(search.value);
-    bindLibraryPicks(onPick);
-  });
-  bindLibraryPicks(onPick);
+  wireLibrary(onPick);
 }
 
 /* ================================================================== *
@@ -2374,7 +2403,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v23 · data stored on this device</p>`;
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v24 · data stored on this device</p>`;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
   $('#set-profiles').addEventListener('click', renderProfiles);

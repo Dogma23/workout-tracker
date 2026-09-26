@@ -24,7 +24,7 @@ screen (it's a PWA). No accounts, no server — your data lives on your device.
 - **Dashboard graphs** — a workout-volume bar chart over your recent sessions, and a per-exercise weight-progress line chart with an exercise picker. Drawn as inline SVG (no chart libraries), so they work offline too.
 - **Dashboard stats** — total workouts, this-week count, day streak, total volume lifted, recent sessions, and personal bests per exercise.
 - **Customize exercises** — from the home screen, edit any day: add exercises, edit sets/reps/notes/type, reorder them, delete, or reset a day to the default plan. Changes stick for future workouts.
-- **Exercise library** — an 80-strong, preloaded, searchable catalogue (Legs, Chest, Back, Shoulders, Arms, Core, Cardio) to add from with one tap; it pre-fills sensible sets/reps/type/notes. Bundled in the app, so it works offline. It's *joint-aware*: movements that load the knee or shoulder are flagged ⚠ with a caution, rather than dumping a generic list full of the exercises this plan avoids.
+- **Exercise library** — 370+ exercises grouped by body part (Chest, Back, Shoulders, Biceps, Triceps, Forearms, Quads, Hamstrings, Glutes, Calves, Core, Full Body, Cardio & Conditioning), covering barbell, dumbbell, cable, Smith machine, machines, kettlebell, bodyweight and bands, plus plyometrics, Olympic lifting, CrossFit and every Hyrox station. Filter by style with one tap or search by name, body part or tag. Bundled in the app, so it works offline. It's *joint-aware*: movements that load a joint you've chosen to protect are flagged ⚠.
 - **Edit past workouts** — tap any recent session to fix a logged weight or rep, toggle whether a set counts, or delete the session. Volume and stats update automatically.
 - **Pre / post-workout segments with timers** — each training day has a **Pre-workout** and a **Post-workout** segment, and you choose the *type* of each: **Warm-up**, **Stretch**, **Cardio**, or **None**. Picking a type sets the segment up with sensible defaults (which you can then edit). Every move has a name and a duration in seconds (e.g. 30s), and during the workout each move shows a **▶ timer** you tap to run its countdown (same beeps as the rest timer). Edit per day in the day editor — pick the type, then add / rename / reorder / delete moves and set each one's seconds. Switching a type only auto-loads defaults when you haven't customised the list, so your edits are never lost.
 - **Offline-first PWA** — add to home screen; it runs with no signal in the gym.
@@ -89,7 +89,7 @@ Recently shipped: light redesign · multi-profile · smart injury-aware cautions
 reminders · workout timer/clock · how-to links · mid-workout add/swap/reorder ·
 supersets (grouping + smart rest) · per-set effort tags (feel-aware progression) ·
 per-day pre/post-workout segments (warm-up / stretch / cardio / none) with per-move timers ·
-**v21–23 redesign**: tabbed navigation, blue light/dark themes, Kanit + Sarabun type, effort ladder + optional pain flag.
+**v21–24 redesign**: tabbed navigation, blue light/dark themes, Kanit + Sarabun type, effort ladder + optional pain flag.
 
 ---
 

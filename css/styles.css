@@ -479,6 +479,22 @@ body:has(.tabbar) #app { padding-bottom: calc(88px + var(--safe-bottom)); }
   margin-bottom: 8px;
 }
 .lib-search:focus { outline: none; border-color: var(--accent); }
+/* style / equipment filter chips — one scrollable row */
+.lib-chips {
+  display: flex; gap: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch;
+  margin: 0 -16px 16px; padding: 0 16px 4px; scrollbar-width: none;
+}
+.lib-chips::-webkit-scrollbar { display: none; }
+.lib-chip {
+  flex: 0 0 auto; white-space: nowrap;
+  font-family: var(--ff-body); font-size: 13px; font-weight: 600;
+  padding: 8px 12px; border-radius: var(--r-tag);
+  border: 1px solid var(--line-strong); background: var(--bg-elev); color: var(--text-dim);
+}
+.lib-chip span { color: var(--text-faint); font-weight: 500; margin-left: 2px; }
+.lib-chip.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.lib-chip.on span { color: var(--on-accent); opacity: .8; }
+.lib-count { color: var(--text-faint); font-weight: 600; margin-left: 4px; }
 .lib-group {
   font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
   color: var(--text-faint); font-weight: 700; margin: 16px 2px 8px;
