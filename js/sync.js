@@ -19,8 +19,8 @@
 // Fill these in from Supabase → Project Settings → API. Both are public by
 // design (row-level security protects the data). NEVER put the service_role
 // key here.
-const SUPABASE_URL = '';
-const SUPABASE_ANON_KEY = '';
+const SUPABASE_URL = 'https://ylbowvhgtzzyrudwmeby.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlsYm93dmhndHp6eXJ1ZHdtZWJ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA0MDk0NjgsImV4cCI6MjEwNTk4NTQ2OH0.2RPLTC6dfxgxXvTpvhXBMrqAljoAguIaTdWrhn34Yvw';
 
 const Cloud = (() => {
   const AUTH_KEY = 'wt_cloud_auth';     // { access_token, refresh_token, expires_at, user:{id,email} }
