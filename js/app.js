@@ -14,10 +14,7 @@ const load = (k, fallback) => {
   try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fallback; }
   catch { return fallback; }
 };
-const save = (k, v) => {
-  localStorage.setItem(k, JSON.stringify(v));
-  if (typeof Cloud !== 'undefined') Cloud.touched(k);   // cloud sync: note what changed & when
-};
+const save = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 
 const DEFAULT_SETTINGS = { rest: 90, sound: true, vibrate: true, unit: 'kg', hydration: true, hydrationMin: 15, theme: 'system', recordPain: true };
 
@@ -587,7 +584,7 @@ function progCardHtml(p) {
 
 // Nudge a backup once there's something worth losing and it's been a week.
 function backupDue() {
-  if (history.length < 3 || Cloud.user()) return false;
+  if (history.length < 3) return false;
   return !settings.lastBackupAt || Date.now() - settings.lastBackupAt > 7 * 864e5;
 }
 
@@ -770,15 +767,12 @@ function renderYou() {
       </div>
     </div>
 
-    <div class="section-title">Cloud backup</div>
-    ${cloudCardHtml()}
-
     <div class="section-title">Settings</div>
     <button class="btn btn-ghost btn-block" data-customize>✎ Customize plan</button>
     <button class="btn btn-ghost btn-block mt8" data-profiles>Profiles</button>
     <button class="btn btn-ghost btn-block mt8" data-settings>Preferences — theme, units, sounds…</button>
 
-    <p class="center muted mt16" style="font-size:12px">${Cloud.user() ? 'Saved on this device and backed up to the cloud.' : 'Data is saved on this device only.'} <a href="privacy.html" target="_blank" rel="noopener">Privacy</a></p>
+    <p class="center muted mt16" style="font-size:12px">Data is saved on this device only.</p>
     ${tabBar('you')}
   `;
 
@@ -788,172 +782,8 @@ function renderYou() {
   $('[data-customize]').addEventListener('click', renderPlanPicker);
   $('[data-profiles]').addEventListener('click', renderProfiles);
   $('[data-settings]').addEventListener('click', openSettings);
-  wireCloudCard();
   wireTabs();
   syncWake();
-}
-
-/* ================================================================== *
- * Cloud backup (Supabase) — card, sign-in / sign-up, Safari link pages
- * ================================================================== */
-function cloudStatusText() {
-  const st = Cloud.status();
-  if (st === 'syncing') return 'Syncing…';
-  if (st === 'offline') return 'Offline — will sync when you’re back online';
-  if (st === 'error') return '⚠ ' + (Cloud.lastError() || 'Sync failed — will retry');
-  const t = Cloud.lastSync();
-  return t ? `Last synced ${fmtDate(t)}` : 'Waiting to sync…';
-}
-function cloudCardHtml() {
-  if (!Cloud.configured()) {
-    return `<div class="cloud-card"><div class="cloud-title">Coming soon</div>
-      <div class="sr-sub">Until then, use Settings → Back up now to keep a copy of your workouts.</div></div>`;
-  }
-  const u = Cloud.user();
-  if (!u) {
-    return `<div class="cloud-card off">
-      <div class="cloud-title">Off — your workouts only live on this phone</div>
-      <div class="sr-sub">Turn on cloud backup to keep everything safe and get it back on a new phone.</div>
-      <button class="btn btn-block mt16" data-cloud-on>Turn on cloud backup</button></div>`;
-  }
-  return `<div class="cloud-card on">
-    <div class="cloud-title">✓ On · ${escapeHtml(u.email || '')}</div>
-    <div class="sr-sub" id="cloud-status">${escapeHtml(cloudStatusText())}</div>
-    <div class="you-av-actions" style="margin-top:16px">
-      <button class="text-btn" data-cloud-sync>Sync now</button>
-      <button class="text-btn" data-cloud-out>Sign out</button>
-      <button class="text-btn danger" data-cloud-del>Delete account</button>
-    </div></div>`;
-}
-let cloudUnsub = null;
-function wireCloudCard() {
-  const on = $('[data-cloud-on]');
-  if (on) on.addEventListener('click', () => renderCloudAuth('signup'));
-  const sync = $('[data-cloud-sync]');
-  if (sync) sync.addEventListener('click', () => Cloud.syncNow());
-  const out = $('[data-cloud-out]');
-  if (out) out.addEventListener('click', (e) => armThen(e.target, 'Tap again to sign out', async () => {
-    await Cloud.signOut(); toast('Signed out — your data stays on this phone'); renderYou();
-  }));
-  const del = $('[data-cloud-del]');
-  if (del) del.addEventListener('click', (e) => armThen(e.target, 'Tap again — deletes your cloud data', async () => {
-    try { await Cloud.deleteAccount(); toast('Account deleted — data on this phone is kept', 3200); }
-    catch (err) { toast(err.message || 'Could not delete account'); }
-    renderYou();
-  }));
-  if (cloudUnsub) cloudUnsub();
-  cloudUnsub = Cloud.onStatus(() => {
-    const el = document.getElementById('cloud-status');
-    if (el) el.textContent = cloudStatusText();
-  });
-}
-
-function renderCloudAuth(mode = 'signup', msg = '') {
-  const isUp = mode === 'signup';
-  document.getElementById('app').innerHTML = `
-    <header class="app-header">
-      <button class="icon-btn" data-back aria-label="Back">‹</button>
-      <div class="wk-head" style="flex:1"><div class="wk-title">Cloud backup</div></div>
-    </header>
-    <div class="seg-tabs">
-      <button class="${isUp ? 'on' : ''}" data-mode="signup">Create account</button>
-      <button class="${!isUp ? 'on' : ''}" data-mode="signin">Sign in</button>
-    </div>
-    <form id="cloud-form" class="form" novalidate>
-      <label class="fld"><span>Email</span>
-        <input id="c-email" type="email" autocomplete="email" inputmode="email" required /></label>
-      <label class="fld"><span>Password${isUp ? ' (at least 8 characters)' : ''}</span>
-        <input id="c-pass" type="password" autocomplete="${isUp ? 'new-password' : 'current-password'}" minlength="8" required /></label>
-      ${isUp ? `<label class="consent"><input id="c-consent" type="checkbox" />
-        <span>I agree to Lift Tracker storing my workouts, profile and the health details I enter (injury areas and notes) in the cloud, as described in the <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</span></label>` : ''}
-      <p class="form-msg" id="c-msg">${escapeHtml(msg)}</p>
-      <button class="btn btn-block btn-lg" type="submit" id="c-submit">${isUp ? 'Create account' : 'Sign in'}</button>
-      ${!isUp ? '<button class="text-btn mt16" type="button" data-forgot>Forgot password?</button>' : ''}
-    </form>
-    <p class="sr-sub mt16">Your workouts keep working offline. Changes back up automatically whenever you have signal.</p>
-  `;
-  $('[data-back]').addEventListener('click', renderYou);
-  document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => renderCloudAuth(b.dataset.mode)));
-  const say = (t) => { $('#c-msg').textContent = t; };
-  const forgot = $('[data-forgot]');
-  if (forgot) forgot.addEventListener('click', async () => {
-    const email = $('#c-email').value.trim();
-    if (!email) { say('Enter your email above first.'); return; }
-    try { await Cloud.resetPassword(email); say('Check your email for a reset link. It opens in Safari — set a new password there, then sign in here.'); }
-    catch (err) { say(err.message); }
-  });
-  $('#cloud-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const email = $('#c-email').value.trim();
-    const pass = $('#c-pass').value;
-    if (!/^\S+@\S+\.\S+$/.test(email)) { say('Enter a valid email address.'); return; }
-    if (pass.length < 8) { say('Password must be at least 8 characters.'); return; }
-    if (isUp && !$('#c-consent').checked) { say('Please tick the box to agree to cloud storage.'); return; }
-    const btn = $('#c-submit'); btn.disabled = true; say(isUp ? 'Creating account…' : 'Signing in…');
-    try {
-      if (isUp) {
-        const r = await Cloud.signUp(email, pass);
-        if (r.needsConfirm) {
-          renderCloudAuth('signin', 'Almost there — check your email and tap the confirmation link. It opens in Safari; once it says confirmed, come back here and sign in.');
-          return;
-        }
-      } else {
-        await Cloud.signIn(email, pass);
-      }
-      toast('Cloud backup on — syncing…', 2600);
-      renderYou();
-    } catch (err) {
-      btn.disabled = false;
-      say(/invalid login/i.test(err.message) ? 'Email or password is incorrect.' : err.message);
-    }
-  });
-}
-
-// Pages reached from the emails Supabase sends (they open in Safari).
-function handleAuthRedirect() {
-  const h = new URLSearchParams(location.hash.replace(/^#/, ''));
-  if (!h.get('type') && !h.get('error')) return false;
-  const clear = () => history.replaceState(null, '', location.pathname + location.search);
-  const page = (title, body) => {
-    document.getElementById('app').innerHTML = `
-      <header class="app-header"><h1><span class="logo" style="color:var(--accent)">${LOGO_SVG}</span> Lift Tracker</h1></header>
-      <div class="cloud-card on"><div class="cloud-title">${title}</div><div class="sr-sub mt8">${body}</div></div>
-      <button class="btn btn-ghost btn-block mt16" data-continue>Continue in this browser</button>`;
-    $('[data-continue]').addEventListener('click', () => { clear(); location.reload(); });
-  };
-  if (h.get('error')) {
-    page('That link didn’t work', escapeHtml(h.get('error_description') || 'It may have expired. Request a new one from the app.'));
-    return true;
-  }
-  if (h.get('type') === 'recovery' && h.get('access_token')) {
-    const tokenFromLink = h.get('access_token');
-    clear();
-    document.getElementById('app').innerHTML = `
-      <header class="app-header"><h1><span class="logo" style="color:var(--accent)">${LOGO_SVG}</span> Lift Tracker</h1></header>
-      <div class="section-title">Set a new password</div>
-      <form id="reset-form" class="form" novalidate>
-        <label class="fld"><span>New password (at least 8 characters)</span><input id="r-pass" type="password" autocomplete="new-password" minlength="8" /></label>
-        <label class="fld"><span>Repeat new password</span><input id="r-pass2" type="password" autocomplete="new-password" minlength="8" /></label>
-        <p class="form-msg" id="r-msg"></p>
-        <button class="btn btn-block btn-lg" type="submit">Save new password</button>
-      </form>`;
-    $('#reset-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const a = $('#r-pass').value, b = $('#r-pass2').value;
-      const say = (t) => { $('#r-msg').textContent = t; };
-      if (a.length < 8) { say('Password must be at least 8 characters.'); return; }
-      if (a !== b) { say('The two passwords don’t match.'); return; }
-      try {
-        await Cloud.setNewPassword(tokenFromLink, a);
-        page('Password updated ✓', 'Open Lift Tracker from your home screen and sign in with your new password.');
-      } catch (err) { say(err.message || 'Could not update the password — request a new link.'); }
-    });
-    return true;
-  }
-  // signup / email confirmation
-  clear();
-  page('Email confirmed ✓', 'Open Lift Tracker from your home screen and sign in to turn on cloud backup.');
-  return true;
 }
 
 /* ================================================================== *
@@ -2588,7 +2418,7 @@ function openSettings() {
       </div>
     </div>
 
-    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v27 · data stored on this device</p>`;
+    <p class="center muted mt16" style="font-size:12px">Lift Tracker · v28 · data stored on this device</p>`;
 
   $('[data-back]').addEventListener('click', () => { renderHome(); window.scrollTo(0, prevScroll); });
   $('#set-profiles').addEventListener('click', renderProfiles);
@@ -2716,21 +2546,10 @@ const LOGO_SVG = `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" xm
   <rect x="7" y="11" width="10" height="2" rx="1" fill="currentColor"/>
 </svg>`;
 
-// Pages opened from Supabase emails (confirm / reset) take priority. Otherwise:
-// first-run setup for a new profile; else restore mid-workout or home.
-if (!handleAuthRedirect()) {
-  if (!currentProfile().onboarded) renderOnboarding(currentProfile().id, false);
-  else if (active) renderWorkout();
-  else renderHome();
-}
-
-// Cloud sync: after a pull changed data, reload state and refresh the tab.
-Cloud.init(() => {
-  profiles = load(PROFILES_KEY, profiles);
-  loadProfileState();
-  const onTab = document.querySelector('.tab.on');
-  if (onTab) goTab(onTab.dataset.tab);
-});
+// First-run setup for a new profile; otherwise restore mid-workout or home.
+if (!currentProfile().onboarded) renderOnboarding(currentProfile().id, false);
+else if (active) renderWorkout();
+else renderHome();
 
 // Unlock the audio context on the first tap so the timer can make sound later
 // (iOS Safari blocks audio that didn't originate from a user gesture).

@@ -4,16 +4,14 @@
    Strategy: NETWORK-FIRST for our own files. When online you always get the
    latest app (and the cache is refreshed); when offline the cached copy is
    used. Bump CACHE on each release so old caches are cleaned up. */
-const CACHE = 'lift-tracker-v27';
+const CACHE = 'lift-tracker-v28';
 const ASSETS = [
   './',
   './index.html',
   './css/styles.css',
   './js/plan.js',
   './js/exercises.js',
-  './js/sync.js',
   './js/app.js',
-  './privacy.html',
   './manifest.webmanifest',
   './icon.svg',
 ];
